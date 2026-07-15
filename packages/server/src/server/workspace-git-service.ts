@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { LRUCache } from "lru-cache";
 import pLimit from "p-limit";
 import type pino from "pino";
@@ -34,10 +34,7 @@ import { runGitCommand } from "../utils/run-git-command.js";
 import { resolveGitHubRemote, type GitHubRemoteIdentity } from "../utils/github-remote.js";
 import { listPaseoWorktrees, type PaseoWorktreeInfo } from "../utils/worktree.js";
 import { READ_ONLY_GIT_ENV } from "./checkout-git-utils.js";
-import {
-  buildWorkspaceGitMetadataFromSnapshot,
-  type WorkspaceGitMetadata,
-} from "./workspace-git-metadata.js";
+import { deriveProjectSlug } from "./workspace-git-metadata.js";
 import { checkoutLiteFromGitSnapshot } from "./workspace-registry-model.js";
 
 const WORKSPACE_GIT_WATCH_DEBOUNCE_MS = 1_000;
@@ -145,10 +142,7 @@ export interface WorkspaceGitService {
     cwdOrRepoRoot: string,
     options?: WorkspaceGitReadOptions,
   ): Promise<WorkspaceGitWorktreeInfo[]>;
-  getWorkspaceGitMetadata(
-    cwd: string,
-    options?: WorkspaceGitReadOptions & { directoryName?: string },
-  ): Promise<WorkspaceGitMetadata>;
+  getProjectSlug(cwd: string, options?: WorkspaceGitReadOptions): Promise<string>;
   resolveRepoRoot(cwd: string, options?: WorkspaceGitReadOptions): Promise<string>;
   resolveDefaultBranch(cwdOrRepoRoot: string, options?: WorkspaceGitReadOptions): Promise<string>;
   resolveRepoRemoteUrl(cwd: string, options?: WorkspaceGitReadOptions): Promise<string | null>;
@@ -625,21 +619,9 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
     });
   }
 
-  async getWorkspaceGitMetadata(
-    cwd: string,
-    options?: WorkspaceGitReadOptions & { directoryName?: string },
-  ): Promise<WorkspaceGitMetadata> {
+  async getProjectSlug(cwd: string, options?: WorkspaceGitReadOptions): Promise<string> {
     const snapshot = await this.getSnapshot(cwd, options);
-    const directoryName = options?.directoryName ?? basename(cwd) ?? cwd;
-    return buildWorkspaceGitMetadataFromSnapshot({
-      cwd: resolve(cwd),
-      directoryName,
-      isGit: snapshot.git.isGit,
-      repoRoot: snapshot.git.repoRoot,
-      mainRepoRoot: snapshot.git.mainRepoRoot,
-      currentBranch: snapshot.git.currentBranch,
-      remoteUrl: snapshot.git.remoteUrl,
-    });
+    return deriveProjectSlug(resolve(cwd), snapshot.git.isGit ? snapshot.git.remoteUrl : null);
   }
 
   async resolveRepoRemoteUrl(

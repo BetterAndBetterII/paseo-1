@@ -317,6 +317,8 @@ export interface AgentTimelineCursorState {
   endSeq: number;
 }
 
+export type WorkspaceRestoreStatus = "restoring" | "failed" | "needs-host-upgrade";
+
 // Per-session state
 export interface SessionState {
   serverId: string;
@@ -363,6 +365,9 @@ export interface SessionState {
   // Project parents with no active workspaces, keyed by projectId. The
   // `emptyProjects` name is the existing protocol/store projection.
   emptyProjects: Map<string, EmptyProjectDescriptor>;
+  // Transient restore state for archived workspaces, keyed by normalized
+  // workspaceId. Cleared in mergeWorkspaces when the descriptor lands.
+  restoringWorkspaces: Map<string, WorkspaceRestoreStatus>;
 
   // Permissions
   pendingPermissions: Map<string, PendingPermission>;
@@ -483,6 +488,19 @@ interface SessionStoreActions {
   setEmptyProjects: (serverId: string, emptyProjects: Iterable<EmptyProjectDescriptor>) => void;
   addEmptyProject: (serverId: string, emptyProject: EmptyProjectDescriptor) => void;
   removeEmptyProject: (serverId: string, projectId: string) => void;
+  applyProjectUpdate: (
+    serverId: string,
+    update:
+      | { kind: "upsert"; project: EmptyProjectDescriptor }
+      | { kind: "remove"; projectId: string },
+  ) => void;
+  setWorkspaceRestoreStatus: (
+    serverId: string,
+    workspaceId: string,
+    status: WorkspaceRestoreStatus,
+  ) => void;
+  clearWorkspaceRestoreStatus: (serverId: string, workspaceId: string) => void;
+
   // Agent activity timestamps
   setAgentLastActivity: (agentId: string, timestamp: Date) => void;
   setAgentLastActivityBatch: (
@@ -555,6 +573,7 @@ function createInitialSessionState(serverId: string, client: DaemonClient): Sess
     agentDetails: new Map(),
     workspaces: new Map(),
     emptyProjects: new Map(),
+    restoringWorkspaces: new Map(),
     pendingPermissions: new Map(),
     fileExplorer: new Map(),
     queuedMessages: new Map(),
@@ -1318,6 +1337,115 @@ export const useSessionStore = create<SessionStore>()(
         });
       },
 
+      applyProjectUpdate: (serverId, update) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session) return prev;
+          if (update.kind === "remove") {
+            const workspaces = new Map(session.workspaces);
+            let changed = session.emptyProjects.has(update.projectId);
+            const emptyProjects = new Map(session.emptyProjects);
+            emptyProjects.delete(update.projectId);
+            for (const [workspaceId, workspace] of workspaces) {
+              if (workspace.projectId === update.projectId) {
+                workspaces.delete(workspaceId);
+                changed = true;
+              }
+            }
+            if (!changed) return prev;
+            return {
+              ...prev,
+              sessions: { ...prev.sessions, [serverId]: { ...session, workspaces, emptyProjects } },
+            };
+          }
+          const project = update.project;
+          let changed = false;
+          const workspaces = new Map(session.workspaces);
+          const hasAttachedWorkspace = [...workspaces.values()].some(
+            (workspace) => workspace.projectId === project.projectId,
+          );
+          for (const [workspaceId, workspace] of workspaces) {
+            if (workspace.projectId !== project.projectId) continue;
+            const next = {
+              ...workspace,
+              projectDisplayName: project.projectDisplayName,
+              projectCustomName: project.projectCustomName,
+              projectRootPath: project.projectRootPath,
+              projectKind: project.projectKind,
+            };
+            const preserved = preserveWorkspaceDescriptorIdentity(next, workspace);
+            if (preserved !== workspace) {
+              workspaces.set(workspaceId, preserved);
+              changed = true;
+            }
+          }
+          const existingEmpty = session.emptyProjects.get(project.projectId);
+          let emptyProjects = session.emptyProjects;
+          if (hasAttachedWorkspace && existingEmpty) {
+            emptyProjects = new Map(session.emptyProjects);
+            emptyProjects.delete(project.projectId);
+            changed = true;
+          } else if (!hasAttachedWorkspace && (!existingEmpty || !equal(existingEmpty, project))) {
+            emptyProjects = new Map(session.emptyProjects);
+            emptyProjects.set(project.projectId, project);
+            changed = true;
+          }
+          if (!changed) return prev;
+          return {
+            ...prev,
+            sessions: { ...prev.sessions, [serverId]: { ...session, workspaces, emptyProjects } },
+          };
+        });
+      },
+
+      setWorkspaceRestoreStatus: (serverId, workspaceId, status) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session) {
+            return prev;
+          }
+          if (session.restoringWorkspaces.get(workspaceId) === status) {
+            return prev;
+          }
+          // A late dir-gone timeout must not override a successful restore:
+          // only mark failed while still restoring and the descriptor is absent.
+          if (
+            status === "failed" &&
+            (session.restoringWorkspaces.get(workspaceId) !== "restoring" ||
+              session.workspaces.has(workspaceId))
+          ) {
+            return prev;
+          }
+          const next = new Map(session.restoringWorkspaces);
+          next.set(workspaceId, status);
+          return {
+            ...prev,
+            sessions: {
+              ...prev.sessions,
+              [serverId]: { ...session, restoringWorkspaces: next },
+            },
+          };
+        });
+      },
+
+      clearWorkspaceRestoreStatus: (serverId, workspaceId) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session || !session.restoringWorkspaces.has(workspaceId)) {
+            return prev;
+          }
+          const next = new Map(session.restoringWorkspaces);
+          next.delete(workspaceId);
+          return {
+            ...prev,
+            sessions: {
+              ...prev.sessions,
+              [serverId]: { ...session, restoringWorkspaces: next },
+            },
+          };
+        });
+      },
+
       mergeWorkspaces: (serverId, workspaces) => {
         const nextEntries = Array.from(workspaces);
         set((prev) => {
@@ -1331,8 +1459,16 @@ export const useSessionStore = create<SessionStore>()(
           // empty: prune any stale empty descriptor so it stops governing the
           // project's rendered metadata.
           const nextEmptyProjects = new Map(session.emptyProjects);
+          // A descriptor arriving is the success signal for a pending restore:
+          // clear it at the source so every entry point converges to "ready".
+          let nextRestoring: Map<string, WorkspaceRestoreStatus> | null = null;
           for (const workspace of nextEntries) {
             if (nextEmptyProjects.delete(workspace.projectId)) {
+              changed = true;
+            }
+            if (session.restoringWorkspaces.has(workspace.id)) {
+              nextRestoring ??= new Map(session.restoringWorkspaces);
+              nextRestoring.delete(workspace.id);
               changed = true;
             }
             const existing = next.get(workspace.id);
@@ -1354,6 +1490,7 @@ export const useSessionStore = create<SessionStore>()(
                 ...session,
                 workspaces: next,
                 emptyProjects: nextEmptyProjects,
+                restoringWorkspaces: nextRestoring ?? session.restoringWorkspaces,
               },
             },
           };
@@ -1572,3 +1709,14 @@ export const useSessionStore = create<SessionStore>()(
     };
   }),
 );
+
+export function useWorkspaceRestoreStatus(
+  serverId: string | null,
+  workspaceId: string | null,
+): WorkspaceRestoreStatus | null {
+  return useSessionStore((state) =>
+    serverId && workspaceId
+      ? (state.sessions[serverId]?.restoringWorkspaces.get(workspaceId) ?? null)
+      : null,
+  );
+}

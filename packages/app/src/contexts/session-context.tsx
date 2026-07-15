@@ -1391,6 +1391,19 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       mergeWorkspaces(serverId, [workspace]);
     });
 
+    const unsubProjectUpdate = client.on("project.update", (message) => {
+      if (message.type !== "project.update") return;
+      const update = message.payload;
+      if (update.kind === "remove") {
+        useSessionStore.getState().applyProjectUpdate(serverId, update);
+        return;
+      }
+      useSessionStore.getState().applyProjectUpdate(serverId, {
+        kind: "upsert",
+        project: normalizeEmptyProjectDescriptor(update.project),
+      });
+    });
+
     const unsubScriptStatusUpdate = client.on("script_status_update", (message) => {
       if (message.type !== "script_status_update") return;
       setWorkspaces(serverId, (prev) => patchWorkspaceScripts(prev, message.payload));
@@ -1770,6 +1783,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     });
 
     return () => {
+      unsubProjectUpdate();
       unsubAgentUpdate();
       unsubAgentStream();
       unsubAgentTimeline();
