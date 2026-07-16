@@ -33,7 +33,7 @@ import type {
   AgentStreamEvent,
 } from "./agent/agent-sdk-types.js";
 import { createWorktree } from "../utils/worktree.js";
-import { areEquivalentPaths } from "../utils/path.js";
+import { createRealpathAwarePathMatcher } from "../utils/path.js";
 import {
   readPaseoWorktreeMetadata,
   writePaseoWorktreeFirstAgentBranchAutoNameMetadata,
@@ -1024,9 +1024,8 @@ test("create_agent_request launches from an exact subdirectory in a created work
       .toString()
       .trim();
     expect(
-      areEquivalentPaths(
+      createRealpathAwarePathMatcher(path.join(createdWorktreeRoot, "packages", "app"))(
         createdAgent?.cwd ?? "",
-        path.join(createdWorktreeRoot, "packages", "app"),
       ),
     ).toBe(true);
     expect(findByType(emitted, "status")?.payload).toMatchObject({
