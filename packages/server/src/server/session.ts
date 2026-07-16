@@ -200,6 +200,7 @@ import {
 import type { ProviderUsageService } from "../services/quota-fetcher/service.js";
 import {
   summarizeFetchWorkspacesEntries,
+  workspaceIdsForProjects,
   workspaceIdsOnCheckout,
   WorkspaceDirectory,
   type WorkspaceUpdatesFilter,
@@ -4224,10 +4225,11 @@ export class Session {
     );
 
     if (changedProjectIds.size > 0) {
-      for (const workspace of await this.workspaceRegistry.list()) {
-        if (changedProjectIds.has(workspace.projectId)) {
-          changedWorkspaceIds.add(workspace.workspaceId);
-        }
+      for (const workspaceId of workspaceIdsForProjects(
+        await this.workspaceRegistry.list(),
+        changedProjectIds,
+      )) {
+        changedWorkspaceIds.add(workspaceId);
       }
     }
 
