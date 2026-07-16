@@ -1392,7 +1392,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     });
 
     const unsubProjectUpdate = client.on("project.update", (message) => {
-      if (message.type !== "project.update") return;
       const update = message.payload;
       if (update.kind === "remove") {
         useSessionStore.getState().applyProjectUpdate(serverId, update);
