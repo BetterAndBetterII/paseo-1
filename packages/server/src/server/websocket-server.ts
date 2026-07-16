@@ -1277,6 +1277,8 @@ export class VoiceAssistantWebSocketServer {
         workspaceGithubClone: true,
         // COMPAT(stableProjectIdentity): added in v0.1.109, remove gate after 2027-01-15.
         stableProjectIdentity: true,
+        // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
+        importSessionWorkspaceTarget: true,
       },
     };
   }

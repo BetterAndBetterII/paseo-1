@@ -49,9 +49,9 @@ import { registerEditorTargetHandlers } from "./features/editor-targets/ipc.js";
 import { setupApplicationMenu } from "./features/menu.js";
 import {
   BROWSER_NEW_TAB_REQUEST_EVENT,
+  decideBrowserWindowOpenRequest,
   getPaseoBrowserIdForWebContents,
   getPaseoBrowserWebContents,
-  handleBrowserWindowOpenRequest,
   listRegisteredPaseoBrowserIds,
   isPaseoBrowserWebviewAttach,
   preparePaseoBrowserWebContents,
@@ -64,6 +64,7 @@ import {
 import {
   clearPaseoBrowserProfile,
   getLegacyPaseoBrowserProfileSession,
+  PASEO_BROWSER_PROFILE_PARTITION,
   getPaseoBrowserProfileSession,
   getPaseoBrowserProfileSessions,
   listPaseoBrowserProfileGuests,
@@ -84,6 +85,7 @@ import {
 import { runDesktopStartup } from "./desktop-startup.js";
 import { autoUpdateInstalledSkills } from "./integrations/skills/index.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
+import { installAppUpdateOnQuit } from "./features/auto-updater.js";
 
 const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
 const APP_SCHEME = "paseo";
@@ -224,6 +226,79 @@ function showBrowserWebviewContextMenu(
         ]),
   ]);
   menu.popup({ window: win });
+}
+
+function getBrowserPopupWindowOptions(
+  mainWindow: BrowserWindow,
+): Electron.BrowserWindowConstructorOptions {
+  return {
+    parent: mainWindow,
+    show: true,
+    autoHideMenuBar: true,
+    webPreferences: {
+      partition: PASEO_BROWSER_PROFILE_PARTITION,
+      nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
+      nodeIntegrationInWorker: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      webviewTag: false,
+      allowRunningInsecureContent: false,
+    },
+  };
+}
+
+function installBrowserWindowOpenHandler(input: {
+  contents: Electron.WebContents;
+  sourceContents: Electron.WebContents;
+  mainWindow: BrowserWindow;
+}): void {
+  const { contents, sourceContents, mainWindow } = input;
+
+  contents.setWindowOpenHandler(({ url, disposition, frameName, features, postBody }) => {
+    const decision = decideBrowserWindowOpenRequest({
+      url,
+      disposition,
+      frameName,
+      features,
+      hasPostBody: postBody !== undefined && postBody !== null,
+    });
+
+    if (decision.kind === "deny") {
+      return { action: "deny" };
+    }
+    if (decision.kind === "popup") {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: getBrowserPopupWindowOptions(mainWindow),
+      };
+    }
+
+    const sourceBrowserId = getPaseoBrowserIdForWebContents(sourceContents);
+    if (sourceBrowserId) {
+      mainWindow.webContents.send(BROWSER_NEW_TAB_REQUEST_EVENT, {
+        sourceBrowserId,
+        url: decision.url,
+      });
+    } else {
+      pendingBrowserWindowOpenRequests.add(sourceContents.id, decision.url);
+    }
+    return { action: "deny" };
+  });
+
+  contents.on("did-create-window", (popupWindow) => {
+    const popupContents = popupWindow.webContents;
+    registerBrowserWebviewNavigationGuards(popupContents);
+    popupContents.on("context-menu", (_event, params) => {
+      showBrowserWebviewContextMenu(popupWindow, popupContents, params);
+    });
+    installBrowserWindowOpenHandler({
+      contents: popupContents,
+      sourceContents,
+      mainWindow,
+    });
+  });
 }
 
 // In dev mode, detect git worktrees and isolate each instance so multiple
@@ -722,18 +797,10 @@ async function createWindow(
         });
       }
     });
-    contents.setWindowOpenHandler(({ url }) => {
-      const sourceBrowserId = getPaseoBrowserIdForWebContents(contents);
-      if (!sourceBrowserId) {
-        pendingBrowserWindowOpenRequests.add(contents.id, url);
-      }
-      return handleBrowserWindowOpenRequest({
-        url,
-        sourceBrowserId,
-        requestNewTab: (payload) => {
-          mainWindow.webContents.send(BROWSER_NEW_TAB_REQUEST_EVENT, payload);
-        },
-      });
+    installBrowserWindowOpenHandler({
+      contents,
+      sourceContents: contents,
+      mainWindow,
     });
     contents.on("context-menu", (_contextMenuEvent, params) => {
       showBrowserWebviewContextMenu(mainWindow, contents, params);
@@ -932,8 +999,18 @@ app.on(
         stopDaemon: () => stopDesktopDaemonViaCli("quit"),
         showShutdownFeedback: showDaemonShutdownDialog,
       }),
+    installAppUpdateOnQuit: async () => {
+      const settings = await getDesktopSettingsStore().get();
+      return installAppUpdateOnQuit({
+        currentVersion: app.getVersion(),
+        releaseChannel: settings.releaseChannel,
+      });
+    },
     onStopError: (error) => {
       log.error("[desktop daemon] failed to stop managed daemon on quit", error);
+    },
+    onUpdateError: (error) => {
+      log.error("[auto-updater] failed to validate downloaded update on quit", error);
     },
   }),
 );

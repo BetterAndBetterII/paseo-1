@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 
 import { afterEach, beforeEach, expect, test } from "vitest";
 
@@ -10,6 +10,7 @@ import {
   FileBackedProjectRegistry,
   FileBackedWorkspaceRegistry,
   createPersistedWorkspaceRecord,
+  type PersistedProjectRecord,
   type WorkspaceRegistry,
 } from "../../workspace-registry.js";
 import type { CreatePaseoWorktreeWorkflowResult } from "../../worktree-session.js";
@@ -25,6 +26,7 @@ import {
 
 const logger = createTestLogger();
 const ARCHIVED_AT = "2026-01-01T00:00:00.000Z";
+const directorySymlinkType = process.platform === "win32" ? "junction" : "dir";
 
 let tmpDir: string;
 let gitRoots: Set<string>;
@@ -80,6 +82,7 @@ beforeEach(async () => {
     workspaceRegistry,
     projectRegistry,
     workspaceGitService: gitService(),
+    logger,
   });
 });
 
@@ -169,6 +172,7 @@ test("persists manual worktree ownership separately from its workspace kind", as
         mainRepoRoot,
       }),
     }),
+    logger,
   });
 
   const workspace = await manualWorktreeProvisioning.findOrCreateWorkspaceForDirectory(cwd);
@@ -227,6 +231,7 @@ test("reopening archived exact-root records restores the fresh Git project", asy
         mainRepoRoot: null,
       }),
     }),
+    logger,
   });
 
   const reopened = await archivedProvisioning.ensureWorkspaceRecordUnarchived(workspace);
@@ -265,6 +270,7 @@ test("uses one workspace snapshot when reopening an archived workspace", async (
     workspaceRegistry: snapshotRegistry,
     projectRegistry,
     workspaceGitService: gitService(),
+    logger,
   });
 
   const reopened = await snapshotProvisioning.findOrCreateWorkspaceForDirectory(repo);
@@ -478,3 +484,137 @@ test("findOrCreateProjectForDirectory keeps nested selected roots independent", 
   expect(second.rootPath).toBe(path.join(repo, "sub"));
   expect(await projectRegistry.list()).toHaveLength(2);
 });
+
+test("runInImportWorkspace uses an active requested workspace without creating another", async () => {
+  const cwd = path.join(tmpDir, "requested");
+  mkdirSync(cwd);
+  const workspace = await provisioning.createWorkspaceForDirectory(cwd);
+
+  const result = await provisioning.runInImportWorkspace(
+    { cwd, requestedWorkspaceId: workspace.workspaceId },
+    async (target) => target.workspaceId,
+  );
+
+  expect(result).toEqual({ value: workspace.workspaceId, createdWorkspace: null });
+  expect(await workspaceRegistry.list()).toEqual([workspace]);
+});
+
+test.each(["missing", "archived"] as const)(
+  "runInImportWorkspace rejects a %s requested workspace before importing",
+  async (state) => {
+    const cwd = path.join(tmpDir, "unavailable-workspace");
+    mkdirSync(cwd);
+    const workspace = await provisioning.createWorkspaceForDirectory(cwd);
+    if (state === "archived") {
+      await workspaceRegistry.archive(workspace.workspaceId, ARCHIVED_AT);
+    } else {
+      await workspaceRegistry.remove(workspace.workspaceId);
+    }
+    let imported = false;
+
+    await expect(
+      provisioning.runInImportWorkspace(
+        { cwd, requestedWorkspaceId: workspace.workspaceId },
+        async () => {
+          imported = true;
+        },
+      ),
+    ).rejects.toThrow(`Workspace not found: ${workspace.workspaceId}`);
+    expect(imported).toBe(false);
+  },
+);
+
+test.each(["missing", "archived"] as const)(
+  "runInImportWorkspace rejects a requested workspace whose project is %s before importing",
+  async (state) => {
+    const cwd = path.join(tmpDir, "unavailable-project");
+    mkdirSync(cwd);
+    const workspace = await provisioning.createWorkspaceForDirectory(cwd);
+    if (state === "archived") {
+      await projectRegistry.archive(workspace.projectId, ARCHIVED_AT);
+    } else {
+      await projectRegistry.remove(workspace.projectId);
+    }
+    let imported = false;
+
+    await expect(
+      provisioning.runInImportWorkspace(
+        { cwd, requestedWorkspaceId: workspace.workspaceId },
+        async () => {
+          imported = true;
+        },
+      ),
+    ).rejects.toThrow(`Project not found: ${workspace.projectId}`);
+    expect(imported).toBe(false);
+  },
+);
+
+test("runInImportWorkspace accepts a filesystem-equivalent requested cwd", async () => {
+  const cwd = path.join(tmpDir, "real-directory");
+  const alias = path.join(tmpDir, "directory-alias");
+  mkdirSync(cwd);
+  symlinkSync(cwd, alias, directorySymlinkType);
+  const workspace = await provisioning.createWorkspaceForDirectory(cwd);
+
+  const result = await provisioning.runInImportWorkspace(
+    { cwd: alias, requestedWorkspaceId: workspace.workspaceId },
+    async (target) => target.workspaceId,
+  );
+
+  expect(result.value).toBe(workspace.workspaceId);
+});
+
+test("runInImportWorkspace rejects a requested workspace with a different cwd", async () => {
+  const cwd = path.join(tmpDir, "workspace-directory");
+  const otherCwd = path.join(tmpDir, "other-directory");
+  mkdirSync(cwd);
+  mkdirSync(otherCwd);
+  const workspace = await provisioning.createWorkspaceForDirectory(cwd);
+  let imported = false;
+
+  await expect(
+    provisioning.runInImportWorkspace(
+      { cwd: otherCwd, requestedWorkspaceId: workspace.workspaceId },
+      async () => {
+        imported = true;
+      },
+    ),
+  ).rejects.toThrow(`Import cwd does not match workspace: ${workspace.workspaceId}`);
+  expect(imported).toBe(false);
+});
+
+test("runInImportWorkspace creates one fresh workspace for an untargeted import", async () => {
+  const cwd = path.join(tmpDir, "fresh-import");
+  mkdirSync(cwd);
+
+  const result = await provisioning.runInImportWorkspace(
+    { cwd },
+    async (workspace) => workspace.workspaceId,
+  );
+
+  expect(result.value).toBe(result.createdWorkspace?.workspaceId);
+  expect(await workspaceRegistry.list()).toEqual([result.createdWorkspace]);
+});
+
+test.each(["missing", "archived"] as const)(
+  "runInImportWorkspace restores the exact %s project state when an untargeted import fails",
+  async (state) => {
+    const cwd = path.join(tmpDir, `failed-import-${state}`);
+    mkdirSync(cwd);
+    let previousProject: PersistedProjectRecord | null = null;
+    if (state === "archived") {
+      const project = await provisioning.findOrCreateProjectForDirectory(cwd);
+      await projectRegistry.archive(project.projectId, ARCHIVED_AT);
+      previousProject = await projectRegistry.get(project.projectId);
+    }
+
+    await expect(
+      provisioning.runInImportWorkspace({ cwd }, async () => {
+        throw new Error("provider session is unavailable");
+      }),
+    ).rejects.toThrow("provider session is unavailable");
+
+    expect(await workspaceRegistry.list()).toEqual([]);
+    expect(await projectRegistry.list()).toEqual(previousProject ? [previousProject] : []);
+  },
+);
