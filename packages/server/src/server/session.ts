@@ -897,6 +897,7 @@ export class Session {
       scriptRuntimeStore: this.scriptRuntimeStore,
       terminalManager: this.terminalManager,
       workspaceRegistry: this.workspaceRegistry,
+      projectRegistry: this.projectRegistry,
       workspaceGitService: this.workspaceGitService,
       getDaemonTcpPort: this.getDaemonTcpPort,
       getDaemonTcpHost: this.getDaemonTcpHost,
@@ -3764,7 +3765,7 @@ export class Session {
       statusEnteredAt: null,
       activityAt: null,
       diffStat,
-      scripts: this.buildWorkspaceScriptPayloadSnapshot(workspace.workspaceId, workspace.cwd),
+      scripts: this.buildWorkspaceScriptPayloadSnapshot(workspace, resolvedProjectRecord),
       ...(resolvedProjectRecord
         ? {
             project: await this.buildProjectPlacementForWorkspace(workspace, resolvedProjectRecord),
@@ -3868,7 +3869,7 @@ export class Session {
     projectRecord?: PersistedProjectRecord | null;
     includeGitData: boolean;
   }): Promise<WorkspaceDescriptorPayload> {
-    if (input.includeGitData && input.projectRecord?.kind === "git") {
+    if (input.includeGitData && input.workspace.kind !== "directory") {
       return this.describeWorkspaceRecordWithGitData(input.workspace, input.projectRecord);
     }
     return this.describeWorkspaceRecord(input.workspace, input.projectRecord);
@@ -5130,10 +5131,10 @@ export class Session {
   // Named accessor: the workspace descriptor builder and the git-watch test both read a workspace's
   // scripts snapshot through here; the workspace-scripts module owns the payload assembly.
   private buildWorkspaceScriptPayloadSnapshot(
-    workspaceId: string,
-    workspaceDirectory: string,
+    workspace: PersistedWorkspaceRecord,
+    project: PersistedProjectRecord | null,
   ): WorkspaceDescriptorPayload["scripts"] {
-    return this.workspaceScripts.buildSnapshot(workspaceId, workspaceDirectory);
+    return this.workspaceScripts.buildSnapshot(workspace, project);
   }
 
   private handleStartWorkspaceScriptRequest(request: StartWorkspaceScriptRequest): Promise<void> {
