@@ -1019,6 +1019,19 @@ export class Session {
     await this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds, options);
   }
 
+  async syncWorkspaceGitObserversForExternalWorkspaceIds(
+    workspaceIds: Iterable<string>,
+  ): Promise<void> {
+    await Promise.all(
+      Array.from(new Set(workspaceIds)).map(async (workspaceId) => {
+        const workspace = await this.workspaceRegistry.get(workspaceId);
+        if (workspace && !workspace.archivedAt) {
+          await this.workspaceGitObserver.syncObserverForWorkspace(workspace);
+        }
+      }),
+    );
+  }
+
   async warmWorkspaceGitDataForWorkspace(workspace: PersistedWorkspaceRecord): Promise<void> {
     await this.workspaceGitObserver.warmGitData(workspace);
   }
