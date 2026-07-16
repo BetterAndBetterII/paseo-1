@@ -1324,7 +1324,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
       workspace: {
         workspaceId: "ws-fix-attached-pr-context",
         projectId: "/tmp/repo",
-        cwd: "/tmp/worktrees/fix-attached-pr-context",
+        cwd: "/tmp/worktrees/fix-attached-pr-context/packages/app",
         kind: "worktree" as const,
         displayName: "fix-attached-pr-context",
         createdAt: "2026-04-30T00:00:00.000Z",
@@ -1381,7 +1381,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
       }),
       expect.anything(),
     );
-    expect(result.sessionConfig.cwd).toBe("/tmp/worktrees/fix-attached-pr-context");
+    expect(result.sessionConfig.cwd).toBe("/tmp/worktrees/fix-attached-pr-context/packages/app");
   });
 
   test("buildAgentSessionConfig invalidates GitHub cache after branch setup mutations", async () => {
