@@ -242,6 +242,8 @@ async function upsertWorkspaceForWorktree(options: {
     displayName: options.worktree.branchName || normalizedCwd,
     branch: options.worktree.branchName || null,
     baseBranch: options.baseBranch ?? null,
+    isPaseoOwnedWorktree: true,
+    mainRepoRoot: normalizedRepoRoot,
     title: options.title ?? null,
     createdAt: now,
     updatedAt: now,
