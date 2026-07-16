@@ -65,6 +65,7 @@ import type { AttachmentMetadata } from "@/attachments/types";
 import { splitComposerAttachmentsForSubmit } from "@/composer/attachments/submit";
 import { reconcilePreviousAgentStatuses } from "@/contexts/session-status-tracking";
 import { patchWorkspaceScripts } from "@/contexts/session-workspace-scripts";
+import { createProjectHydrationBuffer } from "@/contexts/session-workspace-hydration";
 import {
   clearWorkspaceArchivePending,
   shouldSuppressWorkspaceForLocalArchive,
@@ -125,6 +126,8 @@ interface WorkspaceHydrationSnapshot {
   workspaces: Map<string, WorkspaceDescriptor>;
   emptyProjects: Map<string, EmptyProjectDescriptor>;
 }
+
+type ProjectUpdatePayload = Extract<SessionOutboundMessage, { type: "project.update" }>["payload"];
 
 async function fetchWorkspaceHydrationSnapshot(input: {
   client: DaemonClient;
@@ -586,6 +589,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   const wasConnectedRef = useRef(isConnected);
   const audioOutputBuffersRef = useRef<Map<string, BufferedAudioChunk[]>>(new Map());
   const activeAudioGroupsRef = useRef<Set<string>>(new Set());
+  const projectHydrationBufferRef = useRef(createProjectHydrationBuffer<ProjectUpdatePayload>());
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
@@ -604,38 +608,74 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     );
   }, [sessionAgents]);
 
+  const applyProjectUpdate = useCallback(
+    (update: ProjectUpdatePayload) => {
+      useSessionStore
+        .getState()
+        .applyProjectUpdate(
+          serverId,
+          update.kind === "upsert"
+            ? { kind: "upsert", project: normalizeEmptyProjectDescriptor(update.project) }
+            : update,
+        );
+    },
+    [serverId],
+  );
+
   const hydrateWorkspaces = useCallback(
     async (options?: { subscribe?: boolean; isCancelled?: () => boolean }) => {
       if (!client || !isConnected) {
         return;
       }
 
-      const snapshot = await fetchWorkspaceHydrationSnapshot({
-        client,
-        serverId,
-        subscribe: options?.subscribe ?? false,
-        isCancelled: options?.isCancelled,
-      });
-      if (!snapshot || options?.isCancelled?.()) {
-        return;
-      }
+      const hydration = projectHydrationBufferRef.current.begin();
+      try {
+        const snapshot = await fetchWorkspaceHydrationSnapshot({
+          client,
+          serverId,
+          subscribe: options?.subscribe ?? false,
+          isCancelled: options?.isCancelled,
+        });
+        if (!snapshot || options?.isCancelled?.()) {
+          projectHydrationBufferRef.current.cancel(hydration);
+          return;
+        }
 
-      const didBackfillLegacy = await backfillLegacyDaemonWorkspaceDirectoryIfEmpty({
-        client,
-        serverId,
-        workspaces: snapshot.workspaces,
-        emptyProjects: snapshot.emptyProjects,
-        isCancelled: options?.isCancelled,
-      });
-      if (didBackfillLegacy) {
-        return;
-      }
+        const didBackfillLegacy = await backfillLegacyDaemonWorkspaceDirectoryIfEmpty({
+          client,
+          serverId,
+          workspaces: snapshot.workspaces,
+          emptyProjects: snapshot.emptyProjects,
+          isCancelled: options?.isCancelled,
+        });
+        if (didBackfillLegacy) {
+          projectHydrationBufferRef.current.commit(hydration, () => {}, applyProjectUpdate);
+          return;
+        }
 
-      setWorkspaces(serverId, snapshot.workspaces);
-      setEmptyProjects(serverId, snapshot.emptyProjects.values());
-      setHasHydratedWorkspaces(serverId, true);
+        projectHydrationBufferRef.current.commit(
+          hydration,
+          () => {
+            setWorkspaces(serverId, snapshot.workspaces);
+            setEmptyProjects(serverId, snapshot.emptyProjects.values());
+            setHasHydratedWorkspaces(serverId, true);
+          },
+          applyProjectUpdate,
+        );
+      } catch (error) {
+        projectHydrationBufferRef.current.cancel(hydration);
+        throw error;
+      }
     },
-    [client, isConnected, serverId, setEmptyProjects, setHasHydratedWorkspaces, setWorkspaces],
+    [
+      applyProjectUpdate,
+      client,
+      isConnected,
+      serverId,
+      setEmptyProjects,
+      setHasHydratedWorkspaces,
+      setWorkspaces,
+    ],
   );
 
   const applyAuthoritativeAgentSnapshot = useCallback(
@@ -1393,14 +1433,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
 
     const unsubProjectUpdate = client.on("project.update", (message) => {
       const update = message.payload;
-      if (update.kind === "remove") {
-        useSessionStore.getState().applyProjectUpdate(serverId, update);
-        return;
-      }
-      useSessionStore.getState().applyProjectUpdate(serverId, {
-        kind: "upsert",
-        project: normalizeEmptyProjectDescriptor(update.project),
-      });
+      if (!projectHydrationBufferRef.current.buffer(update)) applyProjectUpdate(update);
     });
 
     const unsubScriptStatusUpdate = client.on("script_status_update", (message) => {
@@ -1832,6 +1865,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     notifyAgentAttention,
     requestCanonicalCatchUp,
     applyAgentUpdatePayload,
+    applyProjectUpdate,
     applyWorkspaceSetupProgress,
     applyTimelineResponse,
     updateSessionServerInfo,
