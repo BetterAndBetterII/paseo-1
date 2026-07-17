@@ -4081,21 +4081,12 @@ export class Session {
       );
     }
 
-    await this.teardownArchivedWorkspace({
-      workspaceId: existingWorkspace.workspaceId,
-      cwd: existingWorkspace.cwd,
-    });
+    await this.teardownArchivedWorkspace(existingWorkspace.workspaceId);
   }
 
-  // Git watch and subscription state is keyed by directory; the script runtime
-  // store is keyed by the opaque workspace id. Each cleanup uses its own key so an
-  // opaque id is never resolved as a filesystem path.
-  private async teardownArchivedWorkspace(input: {
-    workspaceId: string;
-    cwd: string;
-  }): Promise<void> {
-    this.workspaceGitObserver.removeForCwd(input.cwd);
-    this.scriptRuntimeStore?.removeForWorkspace(input.workspaceId);
+  private async teardownArchivedWorkspace(workspaceId: string): Promise<void> {
+    this.workspaceGitObserver.removeForWorkspaceId(workspaceId);
+    this.scriptRuntimeStore?.removeForWorkspace(workspaceId);
   }
 
   private async reconcileAndEmitWorkspaceUpdates(): Promise<void> {
@@ -4130,10 +4121,7 @@ export class Session {
       result.changesApplied.map(async (change) => {
         switch (change.kind) {
           case "workspace_archived":
-            await this.teardownArchivedWorkspace({
-              workspaceId: change.workspaceId,
-              cwd: change.directory,
-            });
+            await this.teardownArchivedWorkspace(change.workspaceId);
             changedWorkspaceIds.add(change.workspaceId);
             break;
           case "workspace_updated":
