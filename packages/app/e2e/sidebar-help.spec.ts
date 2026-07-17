@@ -82,12 +82,19 @@ test("opens support and release destinations", async ({ page }) => {
 });
 
 test("searches keyboard shortcuts from the sidebar help menu", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "platform", { get: () => "MacIntel" });
+  });
   await gotoAppShell(page);
   await openHelpMenu(page);
   await page.getByTestId("sidebar-help-shortcuts").click();
 
   const dialog = page.getByTestId("keyboard-shortcuts-dialog");
   const search = page.getByPlaceholder("Search shortcuts");
+
+  await search.fill("command+n");
+  await expect(dialog.getByText("New workspace", { exact: true })).toBeVisible();
+
   await search.fill("interrupt");
 
   await expect(dialog.getByText("Interrupt agent", { exact: true })).toBeVisible();

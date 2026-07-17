@@ -12,6 +12,27 @@ import { buildKeyboardShortcutHelpSections } from "@/keyboard/keyboard-shortcuts
 
 const SNAP_POINTS: string[] = ["70%", "92%"];
 
+function shortcutSearchAliases(keys: string[], shortcutOs: "mac" | "non-mac"): string {
+  const aliases = keys.map((key) => {
+    if (shortcutOs === "mac") {
+      if (key === "mod" || key === "meta") return ["cmd", "command"];
+      if (key === "alt") return ["alt", "option"];
+    } else {
+      if (key === "mod" || key === "ctrl") return ["ctrl", "control"];
+      if (key === "meta") return ["win", "windows"];
+    }
+    return [key];
+  });
+  const combinations = aliases.reduce<string[][]>(
+    (prefixes, choices) =>
+      prefixes.flatMap((prefix) => choices.map((choice) => [...prefix, choice])),
+    [[]],
+  );
+  return combinations
+    .flatMap((combination) => [combination.join(" "), combination.join("+")])
+    .join(" ");
+}
+
 export function KeyboardShortcutsDialog() {
   const { t } = useTranslation();
   const open = useKeyboardShortcutsStore((s) => s.shortcutsDialogOpen);
@@ -41,6 +62,7 @@ export function KeyboardShortcutsDialog() {
           row.noteKey ? t(row.noteKey) : row.note,
           row.keys.join(" "),
           formatShortcut(row.keys, shortcutOs),
+          shortcutSearchAliases(row.keys, shortcutOs),
         ]
           .filter(Boolean)
           .join(" ")
