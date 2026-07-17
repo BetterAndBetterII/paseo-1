@@ -3594,7 +3594,7 @@ test("project.remove.request removes an already-empty project", async () => {
   ]);
 });
 
-test("create paseo worktree request returns a registered workspace descriptor", async () => {
+test("create paseo worktree response preserves an explicit non-Git project", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const createdAt = "2026-05-12T12:00:00.000Z";
   vi.setSystemTime(new Date(createdAt));
@@ -3657,7 +3657,15 @@ test("create paseo worktree request returns a registered workspace descriptor", 
   );
 
   const workspaces = new Map();
-  const projects = new Map();
+  const explicitProject = createPersistedProjectRecord({
+    projectId: "prj_explicit_non_git",
+    rootPath: path.join(tempDir, "selected-project"),
+    kind: "non_git",
+    displayName: "Selected project",
+    createdAt,
+    updatedAt: createdAt,
+  });
+  const projects = new Map([[explicitProject.projectId, explicitProject]]);
   session.paseoHome = paseoHome;
   session.workspaceRegistry.get = async (lookupWorkspaceId: string) =>
     workspaces.get(lookupWorkspaceId) ?? null;
@@ -3697,6 +3705,7 @@ test("create paseo worktree request returns a registered workspace descriptor", 
     await session.handleCreatePaseoWorktreeRequest({
       type: "create_paseo_worktree_request",
       cwd: repoDir,
+      projectId: explicitProject.projectId,
       worktreeSlug: "worktree-123",
       requestId: "req-worktree",
     });
@@ -3709,8 +3718,10 @@ test("create paseo worktree request returns a registered workspace descriptor", 
 
   expect(response?.payload.error).toBeNull();
   expect(response?.payload.workspace).toMatchObject({
-    projectDisplayName: "repo",
-    projectKind: "git",
+    projectId: explicitProject.projectId,
+    projectDisplayName: explicitProject.displayName,
+    projectRootPath: explicitProject.rootPath,
+    projectKind: "non_git",
     workspaceKind: "worktree",
     name: "worktree-123",
     status: "done",
@@ -3719,7 +3730,7 @@ test("create paseo worktree request returns a registered workspace descriptor", 
   expect(response?.payload.workspace?.id).toMatch(/^wks_[0-9a-f]{16}$/);
   expect(response?.payload.workspace?.workspaceDirectory).toContain(path.join("worktree-123"));
   expect(workspaces.has(response?.payload.workspace?.id ?? "")).toBe(true);
-  expect(projects.has(response?.payload.workspace?.projectId ?? "")).toBe(true);
+  expect(projects.get(explicitProject.projectId)).toEqual(explicitProject);
 });
 
 test("workspace update fanout for multiple cwd values is deduplicated", async () => {
