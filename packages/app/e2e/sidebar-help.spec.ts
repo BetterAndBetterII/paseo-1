@@ -87,11 +87,14 @@ test("searches keyboard shortcuts from the sidebar help menu", async ({ page }) 
   await page.getByTestId("sidebar-help-shortcuts").click();
 
   const dialog = page.getByTestId("keyboard-shortcuts-dialog");
-  const search = page.getByTestId("keyboard-shortcuts-search");
+  const search = page.getByPlaceholder("Search shortcuts");
   await search.fill("interrupt");
 
   await expect(dialog.getByText("Interrupt agent", { exact: true })).toBeVisible();
   await expect(dialog.getByText("New workspace", { exact: true })).toHaveCount(0);
+
+  await search.fill("no matching shortcut");
+  await expect(dialog.getByText("No results found", { exact: true })).toBeVisible();
 
   await search.fill("");
   await expect(dialog.getByText("New workspace", { exact: true })).toBeVisible();

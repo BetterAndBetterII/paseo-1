@@ -65,7 +65,6 @@ export function KeyboardShortcutsDialog() {
         resetKey: Number(open),
         placeholder: t("settings.shortcuts.searchPlaceholder"),
         autoFocus: true,
-        testID: "keyboard-shortcuts-search",
       },
     }),
     [open, t],
