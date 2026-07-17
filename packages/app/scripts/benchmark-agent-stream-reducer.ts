@@ -1,6 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
+import { summarizeSamples } from "../../../scripts/benchmarks/stats";
+import type { BenchmarkTaskResult } from "../../../scripts/benchmarks/types";
 import {
   processAgentStreamEvents,
   type AgentStreamReducerEvent,
@@ -14,21 +16,14 @@ const WARMUP_RUNS = 2;
 const MEASURED_RUNS = 7;
 const MESSAGE_SIZES_BYTES = [64 * 1024, 256 * 1024, 1024 * 1024] as const;
 
-interface BenchmarkResult {
+interface AgentStreamBenchmarkResult {
   messageBytes: number;
   chunkBytes: number;
   chunksPerFlush: number;
   chunkCount: number;
-  warmupRuns: number;
-  measuredRuns: number;
   p50Ms: number;
   p95Ms: number;
   samplesMs: number[];
-}
-
-function percentile(sortedSamples: number[], percentileValue: number): number {
-  const index = Math.ceil((percentileValue / 100) * sortedSamples.length) - 1;
-  return sortedSamples[Math.max(0, index)] ?? 0;
 }
 
 function buildEventBatches(messageBytes: number): AgentStreamReducerEvent[][] {
@@ -98,7 +93,7 @@ function runWorkload(messageBytes: number, batches: AgentStreamReducerEvent[][])
   }
 }
 
-function benchmark(messageBytes: number): BenchmarkResult {
+function benchmark(messageBytes: number): AgentStreamBenchmarkResult {
   const batches = buildEventBatches(messageBytes);
   for (let index = 0; index < WARMUP_RUNS; index += 1) {
     runWorkload(messageBytes, batches);
@@ -110,29 +105,52 @@ function benchmark(messageBytes: number): BenchmarkResult {
     runWorkload(messageBytes, batches);
     samplesMs.push(performance.now() - start);
   }
-  samplesMs.sort((left, right) => left - right);
+  const summary = summarizeSamples(samplesMs);
 
   return {
     messageBytes,
     chunkBytes: CHUNK_BYTES,
     chunksPerFlush: CHUNKS_PER_FLUSH,
     chunkCount: messageBytes / CHUNK_BYTES,
-    warmupRuns: WARMUP_RUNS,
-    measuredRuns: MEASURED_RUNS,
-    p50Ms: percentile(samplesMs, 50),
-    p95Ms: percentile(samplesMs, 95),
-    samplesMs,
+    p50Ms: summary.p50,
+    p95Ms: summary.p95,
+    samplesMs: summary.samples,
   };
 }
 
 const output = {
-  benchmark: "agent-stream-reducer",
+  schemaVersion: 1,
+  taskId: "agent-stream-reducer",
   generatedAt: new Date().toISOString(),
-  results: MESSAGE_SIZES_BYTES.map(benchmark),
-};
+  metadata: {
+    warmupRuns: WARMUP_RUNS,
+    measuredRuns: MEASURED_RUNS,
+  },
+  cases: MESSAGE_SIZES_BYTES.map(benchmark).map((result) => ({
+    id: `${result.messageBytes}-bytes`,
+    dimensions: {
+      messageBytes: result.messageBytes,
+      chunkBytes: result.chunkBytes,
+      chunksPerFlush: result.chunksPerFlush,
+      chunkCount: result.chunkCount,
+    },
+    metrics: {
+      duration: {
+        unit: "ms",
+        values: {
+          p50: result.p50Ms,
+          p95: result.p95Ms,
+        },
+        samples: result.samplesMs,
+      },
+    },
+  })),
+} satisfies BenchmarkTaskResult;
 const serialized = `${JSON.stringify(output, null, 2)}\n`;
-const outputPath = process.env.PASEO_PERF_OUTPUT;
+const outputPath = process.env.PASEO_BENCHMARK_OUTPUT;
 if (outputPath) {
   writeFileSync(outputPath, serialized);
 }
-process.stdout.write(serialized);
+if (process.env.PASEO_BENCHMARK_QUIET !== "1") {
+  process.stdout.write(serialized);
+}
