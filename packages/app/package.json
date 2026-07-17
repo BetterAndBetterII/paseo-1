@@ -31,6 +31,7 @@
     "profile:composer-typing": "node ./scripts/profile-composer-typing.mjs",
     "profile:explorer-toggle": "node ./scripts/profile-explorer-toggle.mjs",
     "profile:workspace-switching": "node ./scripts/profile-workspace-switching.mjs",
+    "benchmark:agent-stream": "tsx --tsconfig tsconfig.json scripts/benchmark-agent-stream-reducer.ts",
     "profile:workspace-tabs": "node ./scripts/profile-workspace-tabs.mjs",
     "deploy:web": "npm run build:web && wrangler pages deploy dist --project-name paseo-app --branch main",
     "build:terminal-webview": "node ./scripts/build-terminal-webview-html.mjs",

@@ -1652,6 +1652,129 @@ export function processAgentStreamEvent(
   };
 }
 
+type AssistantTimelineReducerEvent = AgentStreamReducerEvent & {
+  event: Extract<AgentStreamEventPayload, { type: "timeline" }> & {
+    item: Extract<
+      Extract<AgentStreamEventPayload, { type: "timeline" }>["item"],
+      { type: "assistant_message" }
+    >;
+  };
+  seq: number;
+  epoch: string;
+};
+
+function isAssistantTimelineReducerEvent(
+  reducerEvent: AgentStreamReducerEvent | undefined,
+): reducerEvent is AssistantTimelineReducerEvent {
+  return (
+    reducerEvent !== undefined &&
+    reducerEvent.event.type === "timeline" &&
+    reducerEvent.event.item.type === "assistant_message" &&
+    typeof reducerEvent.seq === "number" &&
+    typeof reducerEvent.epoch === "string"
+  );
+}
+
+function canCoalesceAssistantEvents(
+  previous: AssistantTimelineReducerEvent,
+  next: AgentStreamReducerEvent | undefined,
+): next is AssistantTimelineReducerEvent {
+  return (
+    isAssistantTimelineReducerEvent(next) &&
+    next.seq === previous.seq + 1 &&
+    next.epoch === previous.epoch &&
+    next.event.provider === previous.event.provider &&
+    next.event.item.messageId === previous.event.item.messageId
+  );
+}
+
+function collectContiguousAssistantEvents(
+  events: AgentStreamReducerEvent[],
+  startIndex: number,
+): AssistantTimelineReducerEvent[] {
+  const first = events[startIndex];
+  if (!isAssistantTimelineReducerEvent(first)) {
+    return [];
+  }
+
+  const run = [first];
+  let previous = first;
+  for (let index = startIndex + 1; index < events.length; index += 1) {
+    const next = events[index];
+    if (!canCoalesceAssistantEvents(previous, next)) {
+      break;
+    }
+    run.push(next);
+    previous = next;
+  }
+  return run;
+}
+
+function processCoalescedAssistantEvents(input: {
+  events: AssistantTimelineReducerEvent[];
+  currentTail: StreamItem[];
+  currentHead: StreamItem[];
+  currentCursor: TimelineCursor | undefined;
+  hasAuthoritativeBaseline?: boolean;
+}): ProcessAgentStreamEventOutput | null {
+  const hasAuthoritativeBaseline = input.hasAuthoritativeBaseline ?? true;
+  if (!hasAuthoritativeBaseline) {
+    return null;
+  }
+
+  let cursor = input.currentCursor;
+  let cursorChanged = false;
+  let resetLiveTimeline = false;
+
+  for (const reducerEvent of input.events) {
+    const sequencing = processTimelineSequencingGate({
+      event: reducerEvent.event,
+      seq: reducerEvent.seq,
+      epoch: reducerEvent.epoch,
+      currentCursor: cursor,
+      hasAuthoritativeBaseline,
+    });
+    if (!sequencing.shouldApplyStreamEvent || sequencing.sideEffects.length > 0) {
+      return null;
+    }
+    if (sequencing.cursorChanged) {
+      cursor = sequencing.nextTimelineCursor ?? undefined;
+      cursorChanged = true;
+    }
+    resetLiveTimeline = resetLiveTimeline || sequencing.resetLiveTimeline;
+  }
+
+  const first = input.events[0];
+  const last = input.events.at(-1);
+  if (!first || !last) {
+    return null;
+  }
+
+  const event: AgentStreamEventPayload = {
+    ...first.event,
+    item: {
+      ...first.event.item,
+      text: input.events.map((entry) => entry.event.item.text).join(""),
+    },
+  };
+  const applied = applyStreamEvent({
+    tail: resetLiveTimeline ? [] : input.currentTail,
+    head: resetLiveTimeline ? [] : input.currentHead,
+    event,
+    timestamp: last.timestamp,
+    source: "live",
+    timelineCursor: { epoch: last.epoch, seq: last.seq },
+  });
+
+  return {
+    ...applied,
+    cursor: cursor ?? null,
+    cursorChanged,
+    acknowledgedClientMessageIds: applied.acknowledgedClientMessageIds ?? [],
+    sideEffects: [],
+  };
+}
+
 export function processAgentStreamEvents(
   input: ProcessAgentStreamEventsInput,
 ): ProcessAgentStreamEventOutput {
@@ -1677,32 +1800,57 @@ export function processAgentStreamEvents(
   const acknowledgedClientMessageIds = new Set<string>();
   const sideEffects: AgentStreamReducerSideEffect[] = [];
 
-  for (const reducerEvent of input.events) {
-    const result = processAgentStreamEvent({
-      event: reducerEvent.event,
-      seq: reducerEvent.seq,
-      epoch: reducerEvent.epoch,
-      currentTail: tail,
-      currentHead: head,
-      currentCursor: cursor,
-      hasAuthoritativeBaseline: input.hasAuthoritativeBaseline,
-      timestamp: reducerEvent.timestamp,
-    });
+  for (let index = 0; index < input.events.length; ) {
+    const reducerEvent = input.events[index];
+    if (!reducerEvent) {
+      break;
+    }
 
-    tail = result.tail;
-    head = result.head;
-    changedTail = changedTail || result.changedTail;
-    changedHead = changedHead || result.changedHead;
-    sideEffects.push(...result.sideEffects);
-    for (const clientMessageId of result.acknowledgedClientMessageIds) {
+    const coalescedEvents = collectContiguousAssistantEvents(input.events, index);
+    const previousReducerEvent = input.events[index - 1];
+    // Keep the first chunk on the existing path so new-message identity and
+    // whitespace semantics are established before continuations are batched.
+    const continuesCurrentRun =
+      isAssistantTimelineReducerEvent(previousReducerEvent) &&
+      canCoalesceAssistantEvents(previousReducerEvent, reducerEvent);
+    const result =
+      continuesCurrentRun && coalescedEvents.length > 1
+        ? processCoalescedAssistantEvents({
+            events: coalescedEvents,
+            currentTail: tail,
+            currentHead: head,
+            currentCursor: cursor,
+            hasAuthoritativeBaseline: input.hasAuthoritativeBaseline,
+          })
+        : null;
+    const processed =
+      result ??
+      processAgentStreamEvent({
+        event: reducerEvent.event,
+        seq: reducerEvent.seq,
+        epoch: reducerEvent.epoch,
+        currentTail: tail,
+        currentHead: head,
+        currentCursor: cursor,
+        hasAuthoritativeBaseline: input.hasAuthoritativeBaseline,
+        timestamp: reducerEvent.timestamp,
+      });
+    index += result ? coalescedEvents.length : 1;
+
+    tail = processed.tail;
+    head = processed.head;
+    changedTail = changedTail || processed.changedTail;
+    changedHead = changedHead || processed.changedHead;
+    sideEffects.push(...processed.sideEffects);
+    for (const clientMessageId of processed.acknowledgedClientMessageIds) {
       acknowledgedClientMessageIds.add(clientMessageId);
     }
-    if (result.taskSnapshot !== undefined) {
-      taskSnapshot = result.taskSnapshot;
+    if (processed.taskSnapshot !== undefined) {
+      taskSnapshot = processed.taskSnapshot;
     }
 
-    if (result.cursorChanged) {
-      cursor = result.cursor ?? undefined;
+    if (processed.cursorChanged) {
+      cursor = processed.cursor ?? undefined;
       cursorChanged = true;
     }
   }
