@@ -634,6 +634,24 @@ npx expo-doctor
 
 Diagnoses version mismatches and native module issues.
 
+## Performance benchmarks
+
+Performance benchmarks use the root task registry in `scripts/benchmarks/tasks.ts`. The root
+runner executes every registered task by default and combines their results under one versioned
+JSON envelope with the Git commit, dirty-worktree flag, and Node runtime identity:
+
+```bash
+npm run benchmark                                      # Run all registered tasks
+npm run benchmark -- --list                            # List registered tasks
+npm run benchmark -- agent-stream-reducer              # Run one task
+npm run benchmark -- --output /tmp/paseo-benchmark.json
+```
+
+Each task writes a `BenchmarkTaskResult` with stable task/case IDs, scalar dimensions, and named
+metrics. Add a benchmark by implementing that result contract and registering its command in
+`scripts/benchmarks/tasks.ts`. Keep workloads deterministic and make each task verify correctness
+before reporting timing data.
+
 ## Typecheck
 
 Always run typecheck after changes:

@@ -2,6 +2,8 @@ import { writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { isDeepStrictEqual } from "node:util";
 import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
+import { summarizeSamples } from "../../../scripts/benchmarks/stats";
+import type { BenchmarkTaskResult } from "../../../scripts/benchmarks/types";
 import {
   processAgentStreamEvent,
   processAgentStreamEvents,
@@ -47,13 +49,9 @@ interface PairedReductionSummary {
 interface BenchmarkResult extends BenchmarkCase {
   chunkBytes: number;
   chunkCount: number;
-  warmupPairs: number;
-  measuredPairs: number;
   baseline: VariantSummary;
   coalesced: VariantSummary;
   pairedReduction: PairedReductionSummary;
-  p50ReductionPercent: number;
-  p95ReductionPercent: number;
 }
 
 interface Workload {
@@ -78,12 +76,12 @@ function percentile(sortedSamples: number[], percentileValue: number): number {
   return sortedSamples[Math.max(0, index)] ?? 0;
 }
 
-function summarizeSamples(samples: number[]): VariantSummary {
-  const sorted = [...samples].sort((left, right) => left - right);
+function summarizeDurations(samples: number[]): VariantSummary {
+  const summary = summarizeSamples(samples);
   return {
-    p50Ms: percentile(sorted, 50),
-    p95Ms: percentile(sorted, 95),
-    samplesMs: sorted,
+    p50Ms: summary.p50,
+    p95Ms: summary.p95,
+    samplesMs: summary.samples,
   };
 }
 
@@ -264,8 +262,8 @@ function benchmark(input: BenchmarkCase): BenchmarkResult {
     }
   }
 
-  const baseline = summarizeSamples(samples.baseline);
-  const coalesced = summarizeSamples(samples.coalesced);
+  const baseline = summarizeDurations(samples.baseline);
+  const coalesced = summarizeDurations(samples.coalesced);
   const pairedReductionSamples = samples.baseline
     .map((duration, index) => {
       const coalescedDuration = samples.coalesced[index];
@@ -279,8 +277,6 @@ function benchmark(input: BenchmarkCase): BenchmarkResult {
     ...input,
     chunkBytes: CHUNK_BYTES,
     chunkCount: input.messageBytes / CHUNK_BYTES,
-    warmupPairs: WARMUP_PAIRS,
-    measuredPairs: MEASURED_PAIRS,
     baseline,
     coalesced,
     pairedReduction: {
@@ -289,20 +285,55 @@ function benchmark(input: BenchmarkCase): BenchmarkResult {
       p95Percent: percentile(pairedReductionSamples, 95),
       samplesPercent: pairedReductionSamples,
     },
-    p50ReductionPercent: (1 - coalesced.p50Ms / baseline.p50Ms) * 100,
-    p95ReductionPercent: (1 - coalesced.p95Ms / baseline.p95Ms) * 100,
   };
 }
 
 const output = {
-  benchmark: "agent-stream-reducer",
-  methodology: "paired-interleaved-ab",
+  schemaVersion: 1,
+  taskId: "agent-stream-reducer",
   generatedAt: new Date().toISOString(),
-  results: BENCHMARK_CASES.map(benchmark),
-};
+  metadata: {
+    methodology: "paired-interleaved-ab",
+    warmupPairs: WARMUP_PAIRS,
+    measuredPairs: MEASURED_PAIRS,
+  },
+  cases: BENCHMARK_CASES.map(benchmark).map((result) => ({
+    id: `${result.messageBytes}-bytes-${result.chunksPerFlush}-chunks-per-flush`,
+    dimensions: {
+      messageBytes: result.messageBytes,
+      chunkBytes: result.chunkBytes,
+      chunkCount: result.chunkCount,
+      chunksPerFlush: result.chunksPerFlush,
+      repetitionsPerSample: result.repetitionsPerSample,
+    },
+    metrics: {
+      baselineDuration: {
+        unit: "ms",
+        values: { p50: result.baseline.p50Ms, p95: result.baseline.p95Ms },
+        samples: result.baseline.samplesMs,
+      },
+      coalescedDuration: {
+        unit: "ms",
+        values: { p50: result.coalesced.p50Ms, p95: result.coalesced.p95Ms },
+        samples: result.coalesced.samplesMs,
+      },
+      pairedReduction: {
+        unit: "percent",
+        values: {
+          p05: result.pairedReduction.p05Percent,
+          p50: result.pairedReduction.p50Percent,
+          p95: result.pairedReduction.p95Percent,
+        },
+        samples: result.pairedReduction.samplesPercent,
+      },
+    },
+  })),
+} satisfies BenchmarkTaskResult;
 const serialized = `${JSON.stringify(output, null, 2)}\n`;
-const outputPath = process.env.PASEO_PERF_OUTPUT;
+const outputPath = process.env.PASEO_BENCHMARK_OUTPUT;
 if (outputPath) {
   writeFileSync(outputPath, serialized);
 }
-process.stdout.write(serialized);
+if (process.env.PASEO_BENCHMARK_QUIET !== "1") {
+  process.stdout.write(serialized);
+}
