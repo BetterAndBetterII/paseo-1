@@ -9,10 +9,11 @@ runs:
   - variant: bounded_live_tail_renderer
     priority: P0
     scale: full
-    status: ready_after_baseline
+    status: rejected
     change: keep completed blocks stable and render only the growing final block through a bounded plain or deferred path
     primary_scope: one MiB mixed Markdown feedback, frame gaps, and Long Task time
     rollback: fully render the growing final block on every update
+    reason: one MiB Long Task p95 improved 52 percent, but end-to-end improved only 4 percent and frame-gap p95 regressed 26 percent
 
   - variant: incomplete_fence_plain_during_stream
     priority: P0
