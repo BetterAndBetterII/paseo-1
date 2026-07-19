@@ -1,5 +1,5 @@
 experiment: desktop_markdown_performance
-status: baseline_ready
+status: p0_complete
 defaults:
   variant: baseline
   scale: full
@@ -77,7 +77,7 @@ gates:
     - post-GC heap does not regress by more than 10 percent
     - no correctness gate fails on Electron web, browser web, iOS, or Android
 execution_policy:
-  - freeze benchmark release v2 before promoting an implementation candidate
+  - freeze benchmark release v4 before promoting an implementation candidate
   - change one major variable per branch commit and benchmark run
   - preserve baseline, candidate, and rollback runs under runs/YYYY-MM-DD
   - use only an isolated daemon and isolated Metro/Electron ports

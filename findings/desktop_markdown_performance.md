@@ -34,6 +34,10 @@ Scorer: `desktop_markdown_metrics_v4`
 - `MD-PARSER-01` shared MarkdownIt instance: rejected at P0. Against a same-commit rollback control,
   feedback p95 improved 9.9% and post-GC heap 4.3%, but end-to-end p95 regressed 0.4% and Long Task
   improved only 0.8%. The implementation was rolled back pending a history-specific benchmark.
+- `MD-P0-FINAL`: accepted combination verification. The final three accepted changes cut 64KiB
+  open-code feedback p95 91.3%, frame-gap p95 93.4%, and heap 46.2%; on 256KiB mixed Markdown they
+  cut feedback p95 97.4%, Long Task 92.7%, frame-gap 96.5%, heap 91.5%, and DOM/AX about 98%.
+  The 1MiB plain control kept end-to-end p95 within -0.6%, frame-gap within +1.9%, and heap flat.
 
 Only v4 runs may promote expandable-renderer candidates. v1 missed later main-thread stalls; v3
 hashed artificial React root boundaries. Both remain calibration evidence only.
