@@ -310,7 +310,7 @@ describe("git diff inline review helpers", () => {
     expect(pressablePropsByLabel.get("Add review comment")?.hitSlop).toBe(SMALL_ACTION_HIT_SLOP);
   });
 
-  it("keeps the line number visible and only floats the plus for line hover", () => {
+  it("keeps gutter hover visual-only on web without mounting a plus icon", () => {
     const reviewTarget = target();
     const { container, queryByText, rerender } = render(
       <InlineReviewGutterCell
@@ -318,6 +318,7 @@ describe("git diff inline review helpers", () => {
         comments={EMPTY_COMMENTS}
         isEditorOpen={false}
         onStartComment={vi.fn()}
+        actionTestID="review-gutter-action"
       >
         <span>2</span>
       </InlineReviewGutterCell>,
@@ -325,6 +326,19 @@ describe("git diff inline review helpers", () => {
 
     expect(queryByText("2")).toBeTruthy();
     expect(container.querySelector("[data-icon='Plus']")).toBeNull();
+    expect(
+      container
+        .querySelector("[data-testid='review-gutter-action']")
+        ?.getAttribute("data-paseo-inline-review-gutter-label"),
+    ).toBe("true");
+    expect(pressablePropsByLabel.get("Add review comment")?.onHoverIn).toBeUndefined();
+    expect(pressablePropsByLabel.get("Add review comment")?.onPressIn).toBeUndefined();
+    expect(pressablePropsByLabel.get("Add review comment")?.dataSet).toEqual({
+      paseoInlineReviewGutter: "true",
+      paseoCanComment: "true",
+      paseoLineHovered: "false",
+      paseoEditorOpen: "false",
+    });
 
     rerender(
       <InlineReviewGutterCell
@@ -332,6 +346,7 @@ describe("git diff inline review helpers", () => {
         comments={COMMENT_LIST}
         isEditorOpen={false}
         onStartComment={vi.fn()}
+        actionTestID="review-gutter-action"
       >
         <span>2</span>
       </InlineReviewGutterCell>,
@@ -346,6 +361,7 @@ describe("git diff inline review helpers", () => {
         comments={EMPTY_COMMENTS}
         isEditorOpen
         onStartComment={vi.fn()}
+        actionTestID="review-gutter-action"
       >
         <span>2</span>
       </InlineReviewGutterCell>,
@@ -361,13 +377,20 @@ describe("git diff inline review helpers", () => {
         isEditorOpen={false}
         isLineHovered
         onStartComment={vi.fn()}
+        actionTestID="review-gutter-action"
       >
         <span>2</span>
       </InlineReviewGutterCell>,
     );
 
     expect(queryByText("2")).toBeTruthy();
-    expect(container.querySelector("[data-icon='Plus']")).toBeTruthy();
+    expect(container.querySelector("[data-icon='Plus']")).toBeNull();
+    expect(pressablePropsByLabel.get("Add review comment")?.dataSet).toEqual({
+      paseoInlineReviewGutter: "true",
+      paseoCanComment: "true",
+      paseoLineHovered: "true",
+      paseoEditorOpen: "false",
+    });
   });
 });
 

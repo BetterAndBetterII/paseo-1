@@ -31,6 +31,11 @@ import {
   type InlineReviewActions,
   type InlineReviewEditorState,
 } from "./geometry";
+import {
+  INLINE_REVIEW_GUTTER_LABEL_DATASET,
+  installInlineReviewInteractionStyles,
+} from "./inline-review-interaction-styles";
+import { useInlineReviewGutterInteraction } from "./use-inline-review-gutter-interaction";
 
 type PressableState = PressableStateCallbackType & { hovered?: boolean };
 function iconButtonStyle({ hovered, pressed }: PressableState): StyleProp<ViewStyle> {
@@ -192,6 +197,7 @@ export function InlineReviewGutterCell({
   children,
   reviewTarget,
   comments,
+  isEditorOpen,
   isLineHovered = false,
   lineHeight,
   onStartComment,
@@ -209,42 +215,18 @@ export function InlineReviewGutterCell({
   actionTestID?: string;
 }) {
   const { t } = useTranslation();
+  useEffect(() => installInlineReviewInteractionStyles(), []);
   const canComment = Boolean(reviewTarget);
   const hasComments = comments.length > 0;
-  const [isGutterHovered, setIsGutterHovered] = useState(false);
-  const [isPressed, setIsPressed] = useState(false);
-  const [isDismissedAfterPress, setIsDismissedAfterPress] = useState(false);
-  const isInteractionActive = isGutterHovered || isLineHovered || isPressed;
-  const showAction = canComment && isInteractionActive && !isDismissedAfterPress;
+  const interaction = useInlineReviewGutterInteraction();
+  const showNativeAction =
+    !isWeb && canComment && (interaction.isActive || isLineHovered) && !isEditorOpen;
 
   const handlePress = useCallback(() => {
     if (reviewTarget) {
-      setIsDismissedAfterPress(true);
       onStartComment(reviewTarget);
     }
   }, [reviewTarget, onStartComment]);
-
-  const handleHoverIn = useCallback(() => {
-    setIsGutterHovered(true);
-  }, []);
-
-  const handleHoverOut = useCallback(() => {
-    setIsGutterHovered(false);
-  }, []);
-
-  const handlePressIn = useCallback(() => {
-    setIsPressed(true);
-  }, []);
-
-  const handlePressOut = useCallback(() => {
-    setIsPressed(false);
-  }, []);
-
-  useEffect(() => {
-    if (!isInteractionActive) {
-      setIsDismissedAfterPress(false);
-    }
-  }, [isInteractionActive]);
 
   const pressableStyle = useCallback((): StyleProp<ViewStyle> => style, [style]);
   const lineHeightStyle = useMemo<StyleProp<ViewStyle>>(
@@ -270,6 +252,15 @@ export function InlineReviewGutterCell({
     ],
     [lineHeight],
   );
+  const gutterDataSet = useMemo(
+    () => ({
+      paseoInlineReviewGutter: "true",
+      paseoCanComment: canComment ? "true" : "false",
+      paseoLineHovered: isLineHovered ? "true" : "false",
+      paseoEditorOpen: isEditorOpen ? "true" : "false",
+    }),
+    [canComment, isEditorOpen, isLineHovered],
+  );
 
   return (
     <Pressable
@@ -278,17 +269,20 @@ export function InlineReviewGutterCell({
       hitSlop={canComment ? SMALL_ACTION_HIT_SLOP : undefined}
       disabled={!canComment}
       onPress={handlePress}
-      onHoverIn={handleHoverIn}
-      onHoverOut={handleHoverOut}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
+      {...interaction.pressableProps}
       style={pressableStyle}
+      dataSet={gutterDataSet}
     >
       <View style={innerStyle}>
-        <View style={labelStyle}>
+        <View
+          style={labelStyle}
+          dataSet={INLINE_REVIEW_GUTTER_LABEL_DATASET}
+          testID={isWeb ? actionTestID : undefined}
+        >
           {children}
-          {showAction ? (
-            <InlineReviewAddIcon style={actionIconStyle} testID={actionTestID} />
+          {showNativeAction ? (
+            <InlineReviewAddIcon style={actionIconStyle} testID={!isWeb ? actionTestID : undefined} />
+          )
           ) : null}
         </View>
       </View>
