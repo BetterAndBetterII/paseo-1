@@ -19,6 +19,9 @@ Scorer: `desktop_markdown_metrics_v2`
   and post-GC heap 46.2%; Long Task fell from 862ms to zero and final rendered text was identical.
 - Long-message block virtualization is also promoted to P0: 256KiB mixed Markdown mounts 111k DOM
   / 133k non-ignored AX nodes, retains 2.37GB after GC, and blocks feedback for 5.84s p95.
+- CSS `content-visibility:auto` is rejected: run four could not detach the archived workspace tab
+  within 30 seconds. Long-message work must explicitly bound mounted blocks and preserve lifecycle
+  behavior instead of delegating visibility to browser layout containment.
 
 Only v2 runs may promote subsequent candidates. v1 runs remain calibration evidence because their
 single early feedback sample missed later main-thread stalls.
