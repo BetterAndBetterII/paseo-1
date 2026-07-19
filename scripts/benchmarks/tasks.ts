@@ -56,4 +56,23 @@ export const benchmarkTasks: BenchmarkTaskDefinition[] = [
       "desktop-streaming.benchmark.spec.ts",
     ],
   },
+  {
+    id: "desktop-markdown",
+    description:
+      "Measure representative live Markdown parsing, highlighting, React, DOM, AX, frames, and heap",
+    command: npxCommand,
+    args: [
+      "--no-install",
+      "cross-env",
+      "E2E_DESKTOP_RUNTIME=1",
+      "PASEO_DESKTOP_BENCHMARK=1",
+      "PASEO_MARKDOWN_BENCHMARK=1",
+      "playwright",
+      "test",
+      "--config",
+      "packages/app/playwright.config.ts",
+      "--project=Desktop Chrome",
+      "desktop-streaming.benchmark.spec.ts",
+    ],
+  },
 ];
