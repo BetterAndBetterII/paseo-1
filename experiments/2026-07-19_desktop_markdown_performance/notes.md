@@ -145,3 +145,14 @@ entry-only baseline heap delta 为 14,595,168 bytes；weighted candidate 为 8,9
 （-38.4%）。候选保留 48 项、按 LRU 淘汰 32 项，估算权重为 8,354,112 bytes，未超过
 8MiB 预算。该诊断验证的是长会话累计 retention，不替代 Electron 端到端 benchmark；16KiB
 代码高亮上限已经独立约束单个超大 entry。
+
+## rejected P0 共享 MarkdownIt 实例
+
+候选 `20260719_234658__shared_markdownit_instance__0f4aae` 与同 commit rollback control
+`20260719_234819__per_message_markdownit_control__49eaff` 均运行 5 次 256KiB mixed workload。
+共享 parser 的 feedback p50/p95 从 153.1/239.2ms 降到 149.0/215.6ms（p95 -9.9%），
+post-GC heap 从 156.9/168.5MB 降到 149.6/161.3MB（p95 -4.3%），parse duration p95
+从 12.9ms 降到 9.9ms（-23.3%）。但 end-to-end p95 从 851.2ms 升到 854.8ms
+（+0.4%），Long Task p95 仅从 518ms 降到 514ms（-0.8%），未达到 P0 的 20% 交互晋级
+门槛。实现已回滚；可在未来有 176 条独立 assistant message 的 history-mount 专项 benchmark
+后重新评估为内存 P1，不计入本轮产品收益。

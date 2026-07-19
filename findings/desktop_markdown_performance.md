@@ -31,6 +31,9 @@ Scorer: `desktop_markdown_metrics_v4`
 - `MD-CACHE-01` byte-bounded highlight cache: accepted. An 80-entry TypeScript token-tree workload
   retained 14.60MB after GC with the entry-only cache versus 8.99MB with an 8MiB weighted budget
   (-38.4%); the candidate retained 48 entries and evicted 32 while preserving LRU semantics.
+- `MD-PARSER-01` shared MarkdownIt instance: rejected at P0. Against a same-commit rollback control,
+  feedback p95 improved 9.9% and post-GC heap 4.3%, but end-to-end p95 regressed 0.4% and Long Task
+  improved only 0.8%. The implementation was rolled back pending a history-specific benchmark.
 
 Only v4 runs may promote expandable-renderer candidates. v1 missed later main-thread stalls; v3
 hashed artificial React root boundaries. Both remain calibration evidence only.

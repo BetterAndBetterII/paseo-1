@@ -36,10 +36,11 @@ runs:
   - variant: shared_markdownit_instance
     priority: P0
     scale: full
-    status: queued
+    status: rejected_at_p0
     change: reuse one immutable configured MarkdownIt instance instead of one per assistant message
     primary_scope: history mount heap and switch latency
     rollback: restore per-message MarkdownIt construction
+    reason: on the bounded 256KiB mixed workload feedback p95 improved 9.9 percent and post-GC heap 4.3 percent, but end-to-end p95 regressed 0.4 percent and Long Task improved only 0.8 percent; it missed the 20 percent P0 promotion gate
 
   - variant: adaptive_visible_markdown_cadence
     priority: P1
