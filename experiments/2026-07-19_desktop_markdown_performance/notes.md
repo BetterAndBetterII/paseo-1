@@ -29,7 +29,8 @@
 | 1,000 个 MarkdownIt 实例                       |    170ms、约 221MiB retained | 每消息一个实例存在乘法浪费   |
 
 这些数字用于选择消融变量，不作为产品验收数字。正式结论必须来自冻结的
-`desktop_markdown_rendering@v1` Electron/Chromium benchmark。
+`desktop_markdown_rendering@v2` Electron/Chromium benchmark。v1 仅在流开始时采一次反馈延迟，
+会漏掉后半段 Long Task，因此只保留作 calibration，不用于候选验收。
 
 ## 当前代码短板
 
@@ -52,3 +53,17 @@
   明显下降、heap 增幅不超过 10% 时才进入迁移讨论。
 - React profiler duration 是嵌套 profiler 的求和，可能重复计时；决策以反馈延迟、Long Task、
   frame gap、DOM/AX、post-GC heap 和端到端完成时间为主。
+
+## v1 calibration 与 rejected live-tail 候选
+
+`20260719_223805__baseline_current_renderer__ef244e` 首次量化了三个 anchor：1MiB 单增长块
+end-to-end p95 2,597ms；64KiB 开 fence 产生 29,132 DOM / 58,550 AX nodes；256KiB
+混合 Markdown 产生 111,358 DOM nodes、post-GC heap 2.37GB，Long Task p95 6,922ms。
+
+`20260719_224322__bounded_live_tail_renderer__b90856` 仅对大于 256KiB 的流式增长块使用
+稳定 8KiB plain-text chunks。1MiB 单块 Long Task p95 从 355ms 降到 171ms（-52%），但
+end-to-end 只从 2,597ms 降到 2,502ms（-4%），max frame gap 从 81ms 升到 102ms（+26%）。
+最终 rendered-text hash 完全一致，但候选未达到 promotion gate，代码已回滚。
+
+v1 的 feedback timer 只在开始后 25ms 采一次，无法覆盖后半程同步工作。v2 保持语料不变，
+改为全流周期每 100ms 采样并记录 per-run p95/max；后续正式结论只使用 v2。

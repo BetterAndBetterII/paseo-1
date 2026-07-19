@@ -17,6 +17,7 @@ const STREAM_MESSAGE_SIZES_BYTES = [64 * 1024, 256 * 1024, 1024 * 1024] as const
 const CHUNK_BYTES = 512;
 const DEFAULT_MEASURED_RUNS = 5;
 const FEEDBACK_TARGET_DELAY_MS = 25;
+const FEEDBACK_SAMPLE_INTERVAL_MS = 100;
 const VIEWPORT = { width: 1440, height: 900 };
 const isMarkdownBenchmark = process.env.PASEO_MARKDOWN_BENCHMARK === "1";
 
@@ -110,7 +111,8 @@ interface HighlightProfileSample {
 interface StreamProbe {
   startedAt: number;
   feedbackTargetAt: number;
-  feedbackAt: number | null;
+  feedbackTimer: number;
+  feedbackDelays: number[];
   frameHandle: number;
   previousFrameAt: number;
   frameGaps: number[];
@@ -148,6 +150,8 @@ interface StreamRunSample {
   droppedFrameCount: number;
   maxFrameGapMs: number;
   feedbackDelayMs: number;
+  feedbackDelayMaxMs: number;
+  feedbackSamples: number;
   heapDeltaBytes: number;
   postGcHeapBytes: number;
   markdownBytes: number;
@@ -237,60 +241,69 @@ async function readHeap(page: Page): Promise<number> {
 }
 
 async function armStreamProbe(page: Page): Promise<void> {
-  await page.evaluate((feedbackTargetDelayMs) => {
-    const state = window as BenchmarkWindow;
-    state.__PASEO_AGENT_STREAM_FLUSH_PROFILE__ = [];
-    state.__PASEO_RESET_RENDER_PROFILE__?.();
-    state.__PASEO_MARKDOWN_PARSE_PROFILE__ = [];
-    state.__PASEO_HIGHLIGHT_PROFILE__ = [];
+  await page.evaluate(
+    ({ feedbackTargetDelayMs, feedbackSampleIntervalMs }) => {
+      const state = window as BenchmarkWindow;
+      state.__PASEO_AGENT_STREAM_FLUSH_PROFILE__ = [];
+      state.__PASEO_RESET_RENDER_PROFILE__?.();
+      state.__PASEO_MARKDOWN_PARSE_PROFILE__ = [];
+      state.__PASEO_HIGHLIGHT_PROFILE__ = [];
 
-    const startedAt = performance.now();
-    const longTasks: PerformanceEntry[] = [];
-    const observer =
-      typeof PerformanceObserver === "undefined"
-        ? null
-        : new PerformanceObserver((list) => longTasks.push(...list.getEntries()));
-    try {
-      observer?.observe({ type: "longtask" });
-    } catch {
-      observer?.disconnect();
-    }
+      const startedAt = performance.now();
+      const longTasks: PerformanceEntry[] = [];
+      const observer =
+        typeof PerformanceObserver === "undefined"
+          ? null
+          : new PerformanceObserver((list) => longTasks.push(...list.getEntries()));
+      try {
+        observer?.observe({ type: "longtask" });
+      } catch {
+        observer?.disconnect();
+      }
 
-    const feedbackButton = document.createElement("button");
-    feedbackButton.type = "button";
-    feedbackButton.style.cssText =
-      "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;pointer-events:none";
-    document.body.appendChild(feedbackButton);
+      const feedbackButton = document.createElement("button");
+      feedbackButton.type = "button";
+      feedbackButton.style.cssText =
+        "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;pointer-events:none";
+      document.body.appendChild(feedbackButton);
 
-    const probe: StreamProbe = {
-      startedAt,
-      feedbackTargetAt: startedAt + feedbackTargetDelayMs,
-      feedbackAt: null,
-      frameHandle: 0,
-      previousFrameAt: startedAt,
-      frameGaps: [],
-      longTasks,
-      observer,
-      feedbackButton,
-    };
-    feedbackButton.addEventListener(
-      "click",
-      () => {
-        probe.feedbackAt = performance.now();
-      },
-      { once: true },
-    );
-    window.setTimeout(() => feedbackButton.click(), feedbackTargetDelayMs);
+      const probe: StreamProbe = {
+        startedAt,
+        feedbackTargetAt: startedAt + feedbackTargetDelayMs,
+        feedbackTimer: 0,
+        feedbackDelays: [],
+        frameHandle: 0,
+        previousFrameAt: startedAt,
+        frameGaps: [],
+        longTasks,
+        observer,
+        feedbackButton,
+      };
+      feedbackButton.addEventListener("click", () => {
+        const now = performance.now();
+        probe.feedbackDelays.push(Math.max(0, now - probe.feedbackTargetAt));
+        probe.feedbackTargetAt = now + feedbackSampleIntervalMs;
+        probe.feedbackTimer = window.setTimeout(
+          () => feedbackButton.click(),
+          feedbackSampleIntervalMs,
+        );
+      });
+      probe.feedbackTimer = window.setTimeout(() => feedbackButton.click(), feedbackTargetDelayMs);
 
-    const recordFrame = () => {
-      const now = performance.now();
-      probe.frameGaps.push(now - probe.previousFrameAt);
-      probe.previousFrameAt = now;
+      const recordFrame = () => {
+        const now = performance.now();
+        probe.frameGaps.push(now - probe.previousFrameAt);
+        probe.previousFrameAt = now;
+        probe.frameHandle = window.requestAnimationFrame(recordFrame);
+      };
       probe.frameHandle = window.requestAnimationFrame(recordFrame);
-    };
-    probe.frameHandle = window.requestAnimationFrame(recordFrame);
-    state.__PASEO_STREAM_BENCHMARK_PROBE__ = probe;
-  }, FEEDBACK_TARGET_DELAY_MS);
+      state.__PASEO_STREAM_BENCHMARK_PROBE__ = probe;
+    },
+    {
+      feedbackTargetDelayMs: FEEDBACK_TARGET_DELAY_MS,
+      feedbackSampleIntervalMs: FEEDBACK_SAMPLE_INTERVAL_MS,
+    },
+  );
 }
 
 async function waitForAssistantBytes(page: Page, expectedBytes: number): Promise<void> {
@@ -323,6 +336,7 @@ async function finishStreamProbe(
       if (!probe) throw new Error("stream benchmark probe was not armed");
       probe.observer?.disconnect();
       window.cancelAnimationFrame(probe.frameHandle);
+      window.clearTimeout(probe.feedbackTimer);
       probe.feedbackButton.remove();
 
       const flushes = (state.__PASEO_AGENT_STREAM_FLUSH_PROFILE__ ?? []).filter(
@@ -333,7 +347,12 @@ async function finishStreamProbe(
         probe.startedAt,
         ...renderSamples.map((sample) => sample.commitTime),
       );
-      const feedbackAt = probe.feedbackAt ?? performance.now();
+      if (probe.feedbackDelays.length === 0) {
+        probe.feedbackDelays.push(Math.max(0, performance.now() - probe.feedbackTargetAt));
+      }
+      const sortedFeedbackDelays = [...probe.feedbackDelays].sort((left, right) => left - right);
+      const feedbackP95Index = Math.max(0, Math.ceil(sortedFeedbackDelays.length * 0.95) - 1);
+      const feedbackDelayP95 = sortedFeedbackDelays[feedbackP95Index] ?? 0;
       const assistantMessages = document.querySelectorAll<HTMLElement>(
         '[data-testid="assistant-message"]',
       );
@@ -377,7 +396,9 @@ async function finishStreamProbe(
         longTaskDurationMs: probe.longTasks.reduce((sum, entry) => sum + entry.duration, 0),
         droppedFrameCount: probe.frameGaps.filter((gap) => gap > 20).length,
         maxFrameGapMs: Math.max(0, ...probe.frameGaps),
-        feedbackDelayMs: Math.max(0, feedbackAt - probe.feedbackTargetAt),
+        feedbackDelayMs: feedbackDelayP95,
+        feedbackDelayMaxMs: sortedFeedbackDelays.at(-1) ?? 0,
+        feedbackSamples: sortedFeedbackDelays.length,
         heapDeltaBytes: heapAfterValue - heapBefore,
         postGcHeapBytes: 0,
         markdownBytes,
@@ -463,6 +484,8 @@ function buildCase(input: {
       droppedFrames: countMetric(samples.map((sample) => sample.droppedFrameCount)),
       maxFrameGap: durationMetric(samples.map((sample) => sample.maxFrameGapMs)),
       feedbackDelay: durationMetric(samples.map((sample) => sample.feedbackDelayMs)),
+      feedbackDelayMax: durationMetric(samples.map((sample) => sample.feedbackDelayMaxMs)),
+      feedbackSamples: countMetric(samples.map((sample) => sample.feedbackSamples)),
       heapDelta: bytesMetric(samples.map((sample) => sample.heapDeltaBytes)),
       postGcHeap: bytesMetric(samples.map((sample) => sample.postGcHeapBytes)),
       markdownBytes: bytesMetric(samples.map((sample) => sample.markdownBytes)),
@@ -555,9 +578,11 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
         measuredRuns: MEASURED_RUNS,
         chunkBytes: CHUNK_BYTES,
         feedbackTargetDelayMs: FEEDBACK_TARGET_DELAY_MS,
+        feedbackSampleIntervalMs: FEEDBACK_SAMPLE_INTERVAL_MS,
         viewportWidth: VIEWPORT.width,
         viewportHeight: VIEWPORT.height,
-        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v1" : null,
+        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v2" : null,
+        scorerVersion: isMarkdownBenchmark ? "desktop_markdown_metrics_v2" : null,
       },
       cases,
     } satisfies BenchmarkTaskResult;
