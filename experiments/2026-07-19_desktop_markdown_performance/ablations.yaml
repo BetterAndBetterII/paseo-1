@@ -18,10 +18,11 @@ runs:
   - variant: incomplete_fence_plain_during_stream
     priority: P0
     scale: full
-    status: ready_after_baseline
+    status: rejected
     change: skip syntax highlighting only for an incomplete streaming fence; highlight on close or completion
     primary_scope: unclosed code feedback delay and Long Task time
     rollback: highlight every streaming prefix
+    reason: open-fence end-to-end p95 improved 25 percent and Long Task p95 improved 33 percent, but final token-span mounting still regressed feedback p95 8 percent and frame-gap p95 10 percent
 
   - variant: completed_only_byte_bounded_highlight_cache
     priority: P0
@@ -72,12 +73,13 @@ runs:
     rollback: retain the current per-message and per-link observers
 
   - variant: bounded_code_rendering
-    priority: P1
+    priority: P0
     scale: full
-    status: design_required
-    change: cap mounted token or line nodes with Show more while preserving full copy content
+    status: accepted
+    change: render code above 16KiB as one complete plain monospace node instead of an unbounded syntax-token span tree
     primary_scope: 100KiB completed code DOM, AX, layout, and feedback delay
     rollback: mount every highlighted token span
+    reason: 64KiB code feedback p95 improved 96 percent, Long Task fell to zero, DOM fell from 29132 to 11, AX fell 95 percent, and post-GC heap fell 46 percent with identical final text
 
   - variant: offscreen_stream_ui_pause
     priority: P1
@@ -88,11 +90,11 @@ runs:
     rollback: retain the current frozen-array shell subscription behavior
 
   - variant: long_message_block_virtualization
-    priority: P2
+    priority: P0
     scale: full
-    status: deferred
+    status: queued_after_bounded_code
     change: virtualize blocks inside one exceptionally long message
-    reason: high scroll, selection, measurement, and accessibility risk
+    reason: 256KiB mixed Markdown mounts 111358 DOM and 132619 non-ignored AX nodes, retains 2.37GB post-GC heap, and blocks feedback for 5.84s p95
 
   - variant: streamdown_web_renderer
     priority: P2
