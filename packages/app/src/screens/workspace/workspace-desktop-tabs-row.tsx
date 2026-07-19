@@ -7,8 +7,6 @@ import React, {
   useMemo,
   useRef,
   useState,
-  type Dispatch,
-  type SetStateAction,
 } from "react";
 import {
   Pressable,
@@ -108,8 +106,14 @@ import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import { buildWorkspaceKeyboardHandlerId } from "@/keyboard/handler-id";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
+import { installWorkspaceDesktopTabsWebStyles } from "@/screens/workspace/workspace-desktop-tabs-web-styles";
 
 const DROPDOWN_WIDTH = 220;
+const WORKSPACE_TAB_DATA_SET = { workspaceTab: "true" } as const;
+const WORKSPACE_TAB_ICON_DATA_SET = { workspaceTabIcon: "true" } as const;
+const WORKSPACE_TAB_LABEL_DATA_SET = { workspaceTabLabel: "true" } as const;
+const WORKSPACE_TAB_CLOSE_DATA_SET = { workspaceTabClose: "true" } as const;
+const WORKSPACE_TAB_ACTION_DATA_SET = { workspaceTabAction: "true" } as const;
 const DEFAULT_INLINE_ADD_BUTTON_RESERVED_WIDTH = 36;
 // Chip geometry. `layoutMetrics` measures tabs from these same numbers, so a chip that changes
 // shape without changing them mis-measures and drops the row into the overflow-scroll fallback at
@@ -365,7 +369,8 @@ function WorkspaceNewTabButton({
               testID="workspace-new-tab-menu-trigger"
               accessibilityRole="button"
               accessibilityLabel={tooltipText}
-              style={inlineAddActionButtonStyle}
+              dataSet={WORKSPACE_TAB_ACTION_DATA_SET}
+              style={isWeb ? styles.inlineAddActionButton : inlineAddActionButtonStyle}
             >
               <ThemedPlus size={14} uniProps={extraMutedColorMapping} />
             </DropdownMenuTrigger>
@@ -480,7 +485,8 @@ function WorkspacePaneMaximizeButton({
           onPress={onPress}
           accessibilityRole="button"
           accessibilityLabel={label}
-          style={inlineAddActionButtonStyle}
+          dataSet={WORKSPACE_TAB_ACTION_DATA_SET}
+          style={isWeb ? styles.inlineAddActionButton : inlineAddActionButtonStyle}
         >
           {maximized ? (
             <ThemedMinimize2 size={14} uniProps={extraMutedColorMapping} />
@@ -522,7 +528,8 @@ function WorkspaceExitFocusModeButton({
           onPress={onPress}
           accessibilityRole="button"
           accessibilityLabel={t("workspace.tabs.actions.exitFocusMode")}
-          style={inlineAddActionButtonStyle}
+          dataSet={WORKSPACE_TAB_ACTION_DATA_SET}
+          style={isWeb ? styles.inlineAddActionButton : inlineAddActionButtonStyle}
         >
           <ThemedX size={14} uniProps={mutedColorMapping} />
         </TooltipTrigger>
@@ -596,7 +603,6 @@ function tabKeyExtractor(tab: WorkspaceDesktopTabRowItem) {
 export interface WorkspaceDesktopTabRowItem {
   tab: WorkspaceTabDescriptor;
   isActive: boolean;
-  isCloseHovered: boolean;
   isClosingTab: boolean;
 }
 
@@ -650,7 +656,6 @@ interface WorkspaceDesktopTabsRowProps {
   tabs: WorkspaceDesktopTabRowItem[];
   normalizedServerId: string;
   normalizedWorkspaceId: string;
-  setHoveredCloseTabKey: Dispatch<SetStateAction<string | null>>;
   onNavigateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
@@ -818,19 +823,33 @@ function TabHandleContent({
 
   return (
     <View style={styles.tabHandle} dataSet={tabHandleDataSet}>
-      <View style={styles.tabIcon}>
+      <View style={styles.tabIcon} dataSet={WORKSPACE_TAB_ICON_DATA_SET}>
         <WorkspaceTabIcon presentation={presentation} active={isHighlighted} backdrop={backdrop} />
       </View>
       {showLabel && presentation.titleState === "loading" ? (
         <View style={tabLabelSkeletonStyle} />
       ) : null}
       {showLabel && presentation.titleState !== "loading" ? (
-        <Text style={tabLabelStyle} selectable={false} numberOfLines={1} ellipsizeMode="tail">
+        <Text
+          style={tabLabelStyle}
+          dataSet={WORKSPACE_TAB_LABEL_DATA_SET}
+          selectable={false}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
           {presentation.label}
         </Text>
       ) : null}
     </View>
   );
+}
+
+function TabCloseGlyph({ isClosingTab, active }: { isClosingTab: boolean; active: boolean }) {
+  const colorMapping = active ? foregroundColorMapping : mutedColorMapping;
+  if (isClosingTab) {
+    return <ThemedLoadingSpinner size={12} uniProps={colorMapping} />;
+  }
+  return <ThemedX size={12} uniProps={colorMapping} />;
 }
 
 function TabChip({
@@ -841,12 +860,10 @@ function TabChip({
   resolvedTabWidth,
   showLabel,
   showCloseButton,
-  isCloseHovered,
   isClosingTab,
   presentation,
   tooltipLabel,
   resolvedTab,
-  setHoveredCloseTabKey,
   onNavigateTab,
   onCloseTab,
   dragHandleProps,
@@ -858,12 +875,10 @@ function TabChip({
   resolvedTabWidth: number;
   showLabel: boolean;
   showCloseButton: boolean;
-  isCloseHovered: boolean;
   isClosingTab: boolean;
   presentation: WorkspaceTabPresentation;
   tooltipLabel: string;
   resolvedTab: WorkspaceDesktopTabActions;
-  setHoveredCloseTabKey: Dispatch<SetStateAction<string | null>>;
   onNavigateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   dragHandleProps: DraggableListDragHandleProps | undefined;
@@ -878,7 +893,7 @@ function TabChip({
   // An active tab in a pane that does not have focus stays legible but quiet: it keeps the fill of
   // a hovered chip and the muted label, so only one chip in the window reads as the live one.
   const isActiveFocused = isActive && isFocused;
-  const isHovered = hovered || isCloseHovered;
+  const isHovered = hovered;
   const isHighlighted = isActiveFocused || isHovered;
   const chipBackdrop: SurfaceBackdrop = resolveChipBackdrop({
     isActiveFocused,
@@ -928,14 +943,6 @@ function TabChip({
     event.stopPropagation?.();
   }, []);
 
-  const handleCloseButtonHoverIn = useCallback(() => {
-    setHoveredCloseTabKey(tab.key);
-  }, [setHoveredCloseTabKey, tab.key]);
-
-  const handleCloseButtonHoverOut = useCallback(() => {
-    setHoveredCloseTabKey((current) => (current === tab.key ? null : current));
-  }, [setHoveredCloseTabKey, tab.key]);
-
   const handleCloseButtonPress = useCallback(
     (event: { stopPropagation?: () => void }) => {
       event.stopPropagation?.();
@@ -968,6 +975,7 @@ function TabChip({
               triggerRef={dragHandleProps?.setActivatorNodeRef as unknown as undefined}
               enabledOnMobile={false}
               style={tabChipStyle}
+              dataSet={WORKSPACE_TAB_DATA_SET}
               onPressIn={handleNavigateTab}
               onPress={handleNavigateTab}
               accessibilityRole="button"
@@ -1026,28 +1034,20 @@ function TabChip({
               testID={closeButtonTestId}
               disabled={isClosingTab}
               onPressIn={handleCloseButtonPressIn}
-              onHoverIn={handleCloseButtonHoverIn}
-              onHoverOut={handleCloseButtonHoverOut}
               onPress={handleCloseButtonPress}
+              dataSet={WORKSPACE_TAB_CLOSE_DATA_SET}
               style={styles.tabCloseButton}
             >
-              {({ hovered: closeHovered, pressed }) => {
-                const highlighted = closeHovered || pressed;
-                if (isClosingTab) {
-                  return (
-                    <ThemedLoadingSpinner
-                      size={12}
-                      uniProps={highlighted ? foregroundColorMapping : mutedColorMapping}
-                    />
-                  );
-                }
-                return (
-                  <ThemedX
-                    size={12}
-                    uniProps={highlighted ? foregroundColorMapping : mutedColorMapping}
+              {isWeb ? (
+                <TabCloseGlyph isClosingTab={isClosingTab} active={false} />
+              ) : (
+                ({ hovered: closeHovered, pressed }) => (
+                  <TabCloseGlyph
+                    isClosingTab={isClosingTab}
+                    active={Boolean(closeHovered) || pressed}
                   />
-                );
-              }}
+                )
+              )}
             </Pressable>
           </View>
         ) : null}
@@ -1067,6 +1067,7 @@ function TabChip({
 }
 
 export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
+  useEffect(() => installWorkspaceDesktopTabsWebStyles(), []);
   const [presentations, setPresentations] = useState(
     () => new Map<string, WorkspaceTabPresentation>(),
   );
@@ -1131,7 +1132,6 @@ function ResolvedWorkspaceDesktopTabsRow({
   tabs,
   normalizedServerId,
   normalizedWorkspaceId,
-  setHoveredCloseTabKey,
   onNavigateTab,
   onCloseTab,
   onCopyResumeCommand,
@@ -1553,7 +1553,6 @@ function ResolvedWorkspaceDesktopTabsRow({
           resolvedTabWidth={resolvedTabWidth}
           showLabel={showLabel}
           showCloseButton={shouldShowCloseButton}
-          setHoveredCloseTabKey={setHoveredCloseTabKey}
           onNavigateTab={onNavigateTab}
           onCloseTab={onCloseTab}
           labels={tabMenuLabels}
@@ -1579,7 +1578,6 @@ function ResolvedWorkspaceDesktopTabsRow({
       onNavigateTab,
       onReloadAgent,
       onRenameTab,
-      setHoveredCloseTabKey,
       tabMenuLabels,
       tabDropPreviewIndex,
       displayedTabs.length,
@@ -1724,7 +1722,6 @@ function ResolvedDesktopTabChip({
   resolvedTabWidth,
   showLabel,
   showCloseButton,
-  setHoveredCloseTabKey,
   onNavigateTab,
   onCloseTab,
   labels,
@@ -1749,7 +1746,6 @@ function ResolvedDesktopTabChip({
   resolvedTabWidth: number;
   showLabel: boolean;
   showCloseButton: boolean;
-  setHoveredCloseTabKey: Dispatch<SetStateAction<string | null>>;
   onNavigateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   labels: WorkspaceTabMenuLabels;
@@ -1813,12 +1809,10 @@ function ResolvedDesktopTabChip({
         resolvedTabWidth={resolvedTabWidth}
         showLabel={showLabel}
         showCloseButton={showCloseButton}
-        isCloseHovered={item.isCloseHovered}
         isClosingTab={item.isClosingTab}
         presentation={presentation}
         tooltipLabel={tooltipLabel}
         resolvedTab={resolvedTab}
-        setHoveredCloseTabKey={setHoveredCloseTabKey}
         onNavigateTab={onNavigateTab}
         onCloseTab={onCloseTab}
         dragHandleProps={dragHandleProps}

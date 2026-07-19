@@ -6,9 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type Dispatch,
   type ReactNode,
-  type SetStateAction,
 } from "react";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import {
@@ -100,8 +98,6 @@ interface SplitContainerProps {
   normalizedWorkspaceId: string;
   isWorkspaceFocused: boolean;
   uiTabs: WorkspaceTab[];
-  hoveredCloseTabKey: string | null;
-  setHoveredCloseTabKey: Dispatch<SetStateAction<string | null>>;
   closingTabIds: Set<string>;
   onNavigateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
@@ -392,8 +388,6 @@ export function SplitContainer({
   normalizedWorkspaceId,
   isWorkspaceFocused,
   uiTabs,
-  hoveredCloseTabKey,
-  setHoveredCloseTabKey,
   closingTabIds,
   onNavigateTab,
   onCloseTab,
@@ -677,8 +671,6 @@ export function SplitContainer({
           normalizedServerId={normalizedServerId}
           normalizedWorkspaceId={normalizedWorkspaceId}
           isWorkspaceFocused={isWorkspaceFocused}
-          hoveredCloseTabKey={hoveredCloseTabKey}
-          setHoveredCloseTabKey={setHoveredCloseTabKey}
           closingTabIds={closingTabIds}
           onNavigateTab={onNavigateTab}
           onCloseTab={onCloseTab}
@@ -888,8 +880,6 @@ function SplitNodeView({
   normalizedServerId,
   normalizedWorkspaceId,
   isWorkspaceFocused,
-  hoveredCloseTabKey,
-  setHoveredCloseTabKey,
   closingTabIds,
   onNavigateTab,
   onCloseTab,
@@ -969,8 +959,6 @@ function SplitNodeView({
             normalizedServerId={normalizedServerId}
             normalizedWorkspaceId={normalizedWorkspaceId}
             isWorkspaceFocused={isWorkspaceFocused}
-            hoveredCloseTabKey={hoveredCloseTabKey}
-            setHoveredCloseTabKey={setHoveredCloseTabKey}
             closingTabIds={closingTabIds}
             onNavigateTab={onNavigateTab}
             onCloseTab={onCloseTab}
@@ -1023,8 +1011,6 @@ function SplitNodeView({
               normalizedServerId={normalizedServerId}
               normalizedWorkspaceId={normalizedWorkspaceId}
               isWorkspaceFocused={isWorkspaceFocused}
-              hoveredCloseTabKey={hoveredCloseTabKey}
-              setHoveredCloseTabKey={setHoveredCloseTabKey}
               closingTabIds={closingTabIds}
               onNavigateTab={onNavigateTab}
               onCloseTab={onCloseTab}
@@ -1085,8 +1071,6 @@ function SplitPaneView({
   normalizedServerId,
   normalizedWorkspaceId,
   isWorkspaceFocused,
-  hoveredCloseTabKey,
-  setHoveredCloseTabKey,
   closingTabIds,
   onNavigateTab,
   onCloseTab,
@@ -1166,10 +1150,9 @@ function SplitPaneView({
       paneTabs.map((tab) => ({
         tab,
         isActive: tab.key === activeTabDescriptor?.key,
-        isCloseHovered: hoveredCloseTabKey === tab.key,
         isClosingTab: closingTabIds.has(tab.tabId),
       })),
-    [activeTabDescriptor?.key, closingTabIds, hoveredCloseTabKey, paneTabs],
+    [activeTabDescriptor?.key, closingTabIds, paneTabs],
   );
 
   useEffect(() => {
@@ -1249,7 +1232,6 @@ function SplitPaneView({
             tabs={desktopTabRowItems}
             normalizedServerId={normalizedServerId}
             normalizedWorkspaceId={normalizedWorkspaceId}
-            setHoveredCloseTabKey={setHoveredCloseTabKey}
             onNavigateTab={onNavigateTab}
             onCloseTab={onCloseTab}
             onCopyResumeCommand={onCopyResumeCommand}
