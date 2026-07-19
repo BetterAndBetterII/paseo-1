@@ -107,8 +107,9 @@ describe("buildAgentStreamRenderModel", () => {
 
     expect(atThresholdModel.segments.historyVirtualized).toHaveLength(0);
     expect(atThresholdModel.segments.historyMounted).toBe(atThreshold);
-    expect(overThresholdModel.segments.historyVirtualized.length).toBeGreaterThan(0);
-    expect(overThresholdModel.segments.historyMounted.length).toBeGreaterThan(0);
+    expect(overThresholdModel.segments.historyVirtualized).toHaveLength(32);
+    expect(overThresholdModel.segments.historyMounted).toHaveLength(20);
+    expect(overThresholdModel.segments.historyMounted[0]?.kind).toBe("user_message");
   });
 
   it("keeps head separate from committed history on desktop web", () => {
