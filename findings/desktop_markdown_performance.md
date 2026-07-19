@@ -1,8 +1,8 @@
 # Finding: desktop_markdown_performance
 
-Benchmark: `desktop_markdown_rendering@v2`
+Benchmark: `desktop_markdown_rendering@v4`
 
-Scorer: `desktop_markdown_metrics_v2`
+Scorer: `desktop_markdown_metrics_v4`
 
 ## Current decisions
 
@@ -22,6 +22,11 @@ Scorer: `desktop_markdown_metrics_v2`
 - CSS `content-visibility:auto` is rejected: run four could not detach the archived workspace tab
   within 30 seconds. Long-message work must explicitly bound mounted blocks and preserve lifecycle
   behavior instead of delegating visibility to browser layout containment.
+- `MD-BLOCK-02` bounded promotion + mount window: accepted. The reducer now promotes at most 32
+  stable rows per assistant block group; the remaining message mounts 32 head + 64 tail blocks by
+  default and expands on demand. On 256KiB mixed Markdown, feedback p95 improved 94.6%, Long Task
+  89.5%, DOM 98.1%, AX 98.0%, and post-GC heap 92.6%. Expanded canonical text hash and turn-copy
+  source reconstruction match the unbounded baseline exactly.
 
-Only v2 runs may promote subsequent candidates. v1 runs remain calibration evidence because their
-single early feedback sample missed later main-thread stalls.
+Only v4 runs may promote expandable-renderer candidates. v1 missed later main-thread stalls; v3
+hashed artificial React root boundaries. Both remain calibration evidence only.

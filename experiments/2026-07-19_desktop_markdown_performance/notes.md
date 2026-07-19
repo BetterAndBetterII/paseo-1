@@ -105,3 +105,30 @@ DOM 从 29,132 降到 11，non-ignored AX 从 58,550 降到 3,222，post-GC heap
 应用 `content-visibility:auto`。候选在第 4 次 mixed run 后归档 agent 时，workspace tab 超过
 30 秒仍未 detached，整轮 3.5 分钟失败且没有可发布 metrics。该策略与现有列表高度缓存、
 滚动锚点或 retained tab 生命周期存在冲突，已 rejected 并完全回滚；后续改为显式有界挂载。
+
+## accepted 长消息有界挂载
+
+第一版只在单个 `AssistantMessage` 内保留 32 个 head + 64 个 tail block，没有产生任何收益。
+诊断发现 `promoteCompletedAssistantBlocks()` 会把每个已完成 Markdown block 提升成独立
+`AssistantMessage`；262KiB mixed workload 因而形成 6,551 个 renderer，而不是一个 6,551
+block renderer。这个中间消融保留为定位证据，不晋级。
+
+最终候选把每个流式 assistant block group 的稳定提升上限设为 32，剩余内容保留为一个 live
+remainder；remainder 默认最多挂载 96 个 block（32 head + 64 tail），并提供“显示隐藏段落”按钮。
+展开会挂载完整内容，turn copy 始终从完整 stream items 收集文本，不依赖可见窗口。
+
+正式 v4 baseline `20260719_233546__baseline_v4_unbounded_mixed__c85133` 与候选
+`20260719_233724__bounded_promoted_and_mounted_markdown_blocks_v4__166ed9` 均为 5-run：
+
+- end-to-end p50/p95：7,031.4/7,530.1ms → 838.9/1,005.8ms（p95 -86.6%）
+- feedback p50/p95：6,061.3/6,552.3ms → 201.1/355.8ms（p95 -94.6%）
+- Long Task p50/p95：6,814/7,314ms → 544/769ms（p95 -89.5%）
+- max frame gap p50/p95：5,937.2/6,421.5ms → 255.3/406.1ms（p95 -93.7%）
+- post-GC heap p50/p95：2.331/2.341GB → 161.2/173.0MB（p95 -92.6%）
+- DOM：111,358 → 2,080（-98.1%）；non-ignored AX：132,619 → 2,695（-98.0%）
+- Markdown parse calls：6,552 → 352（-94.6%）；highlight calls：1,310 → 70（-94.7%）
+
+候选默认 hash 因有意隐藏中段而不同；自动展开后的 canonical rendered-text hash 为
+`b01ca4df...ce739`，与无限挂载 baseline 完全一致。reducer 单测同时验证所有源 block 和 turn
+copy 拼接文本无丢失。v3 的旧 scorer 在每个 React message root 间插入人工分隔符，会把内部
+组件边界变化误报为正文差异，因此只保留作 calibration；正式晋级只使用冻结的 v4。
