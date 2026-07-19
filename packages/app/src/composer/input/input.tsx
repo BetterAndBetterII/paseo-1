@@ -63,6 +63,7 @@ import {
   type EditingTextInputHandle as ComposerTextInputHandle,
   type EditingTextInputProps,
 } from "@/components/ui/text-input";
+import { installComposerInputInteractionStyles } from "./install-interaction-styles";
 
 const ComposerTextInput = withUnistyles(EditingTextInput, (theme) => ({
   placeholderTextColor: theme.colors.surface4,
@@ -85,6 +86,9 @@ import {
 
 const DEFAULT_SEND_KEYS: ShortcutKey[][] = [["Enter"]];
 const COMPOSER_INPUT_DATASET = { composerInput: "" } as const;
+const COMPOSER_ATTACH_ACTION_DATASET = { composerInputAction: "attach" } as const;
+const COMPOSER_ATTACH_ICON_DATASET = { composerInputIcon: "attach" } as const;
+const COMPOSER_VOICE_ICON_DATASET = { composerInputIcon: "voice" } as const;
 
 export interface AttachmentMenuItem {
   id: string;
@@ -229,7 +233,12 @@ function AttachButtonIcon({
 }) {
   const colorMapping = hovered ? iconForegroundMapping : iconForegroundMutedMapping;
   return (
-    <View ref={onAttachButtonRef} collapsable={false} style={styles.attachButtonAnchor}>
+    <View
+      ref={onAttachButtonRef}
+      collapsable={false}
+      dataSet={COMPOSER_ATTACH_ICON_DATASET}
+      style={styles.attachButtonAnchor}
+    >
       <ThemedPlus size={buttonIconSize} uniProps={colorMapping} />
     </View>
   );
@@ -258,6 +267,7 @@ function AttachmentDropdown({
   isConnected,
   disabled,
   attachButtonStyle,
+  staticWebAttachButtonStyle,
   renderAttachButtonIcon,
   attachmentMenuItems,
   addAttachmentLabel,
@@ -266,11 +276,23 @@ function AttachmentDropdown({
   isConnected: boolean;
   disabled: boolean;
   attachButtonStyle: React.ComponentProps<typeof DropdownMenuTrigger>["style"];
+  staticWebAttachButtonStyle: React.ComponentProps<typeof Pressable>["style"];
   renderAttachButtonIcon: (input: { hovered?: boolean }) => React.ReactElement;
   attachmentMenuItems: AttachmentMenuItem[];
   addAttachmentLabel: string;
 }) {
   const isButtonDisabled = !isConnected || disabled;
+  const staticWebAttachButtonIcon = useMemo(
+    () => renderAttachButtonIcon({ hovered: false }),
+    [renderAttachButtonIcon],
+  );
+  const webActionDataSet = useMemo(
+    () => ({
+      ...COMPOSER_ATTACH_ACTION_DATASET,
+      composerInputDisabled: isButtonDisabled,
+    }),
+    [isButtonDisabled],
+  );
   if (!visible) return null;
   return (
     <DropdownMenu compactMode="sheet">
@@ -282,8 +304,9 @@ function AttachmentDropdown({
             accessibilityRole="button"
             testID="message-input-attach-button"
             style={attachButtonStyle}
+            dataSet={webActionDataSet}
           >
-            {renderAttachButtonIcon}
+            {isWeb ? staticWebAttachButtonIcon : renderAttachButtonIcon}
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent side="top" align="center" offset={8}>
@@ -316,13 +339,32 @@ function VoiceButtonIcon({
   buttonIconSize: number;
 }) {
   if (isDictating) {
-    return <Square size={buttonIconSize} color="white" fill="white" />;
+    return (
+      <Square
+        size={buttonIconSize}
+        color="white"
+        fill="white"
+        dataSet={COMPOSER_VOICE_ICON_DATASET}
+      />
+    );
   }
   const colorMapping = hovered ? iconForegroundMapping : iconForegroundMutedMapping;
   if (isMutedRealtime) {
-    return <ThemedMicOff size={buttonIconSize} uniProps={colorMapping} />;
+    return (
+      <ThemedMicOff
+        size={buttonIconSize}
+        uniProps={colorMapping}
+        dataSet={COMPOSER_VOICE_ICON_DATASET}
+      />
+    );
   }
-  return <ThemedMic size={buttonIconSize} uniProps={colorMapping} />;
+  return (
+    <ThemedMic
+      size={buttonIconSize}
+      uniProps={colorMapping}
+      dataSet={COMPOSER_VOICE_ICON_DATASET}
+    />
+  );
 }
 
 type ShortcutChord = NonNullable<React.ComponentProps<typeof Shortcut>["chord"]>;
@@ -706,6 +748,7 @@ function VoiceButtonTooltip({
   isRealtimeVoiceForCurrentAgent,
   voiceMuteToggleKeys,
   dictationToggleKeys,
+  isDictating,
 }: {
   visible: boolean;
   onVoicePress: () => void;
@@ -717,8 +760,21 @@ function VoiceButtonTooltip({
   isRealtimeVoiceForCurrentAgent: boolean;
   voiceMuteToggleKeys: ShortcutChord | null | undefined;
   dictationToggleKeys: ShortcutChord | null | undefined;
+  isDictating: boolean;
 }) {
   const shortcut = isRealtimeVoiceForCurrentAgent ? voiceMuteToggleKeys : dictationToggleKeys;
+  const staticWebVoiceButtonIcon = useMemo(
+    () => renderVoiceButtonIcon({ hovered: false }),
+    [renderVoiceButtonIcon],
+  );
+  const webActionDataSet = useMemo(
+    () => ({
+      composerInputAction: "voice",
+      composerInputDisabled: !isDictationStartEnabled,
+      composerInputRecording: isDictating,
+    }),
+    [isDictating, isDictationStartEnabled],
+  );
   if (!visible) return null;
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
@@ -728,8 +784,9 @@ function VoiceButtonTooltip({
         accessibilityRole="button"
         accessibilityLabel={voiceButtonAccessibilityLabel}
         style={voiceButtonStyle}
+        dataSet={webActionDataSet}
       >
-        {renderVoiceButtonIcon}
+        {isWeb ? staticWebVoiceButtonIcon : renderVoiceButtonIcon}
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
         <VoiceTooltipBody voiceTooltipText={voiceTooltipText} shortcut={shortcut} />
@@ -1246,6 +1303,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       [onChangeText, updateLiveTextPresence],
     );
 
+    useEffect(() => installComposerInputInteractionStyles(), []);
+
     useImperativeHandle(ref, () => ({
       focus: () => {
         textInputRef.current?.focus();
@@ -1723,22 +1782,36 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       [t, toast],
     );
 
-    const attachButtonStyle = useCallback(
-      ({ hovered }: { hovered?: boolean }) => [
-        styles.attachButton,
-        Boolean(hovered) && styles.iconButtonHovered,
-        (!isConnected || disabled) && styles.buttonDisabled,
-      ],
+    const staticWebAttachButtonStyle = useMemo(
+      () => [styles.attachButton, (!isConnected || disabled) && styles.buttonDisabled],
       [isConnected, disabled],
     );
+    const attachButtonStyle = useMemo(
+      () =>
+        isWeb
+          ? staticWebAttachButtonStyle
+          : ({ hovered }: { hovered?: boolean }) => [
+              styles.attachButton,
+              Boolean(hovered) && styles.iconButtonHovered,
+              (!isConnected || disabled) && styles.buttonDisabled,
+            ],
+      [isConnected, disabled, staticWebAttachButtonStyle],
+    );
 
-    const voiceButtonStyle = useCallback(
-      ({ hovered }: { hovered?: boolean }) => [
-        styles.voiceButton,
-        Boolean(hovered) && !isDictating && styles.iconButtonHovered,
-        !isDictationStartEnabled && styles.buttonDisabled,
-        isDictating && styles.voiceButtonRecording,
-      ],
+    const voiceButtonStyle = useMemo(
+      () =>
+        isWeb
+          ? [
+              styles.voiceButton,
+              !isDictationStartEnabled && styles.buttonDisabled,
+              isDictating && styles.voiceButtonRecording,
+            ]
+          : ({ hovered }: { hovered?: boolean }) => [
+              styles.voiceButton,
+              Boolean(hovered) && !isDictating && styles.iconButtonHovered,
+              !isDictationStartEnabled && styles.buttonDisabled,
+              isDictating && styles.voiceButtonRecording,
+            ],
       [isDictating, isDictationStartEnabled],
     );
 
@@ -1862,6 +1935,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
                 isConnected={isConnected}
                 disabled={disabled}
                 attachButtonStyle={attachButtonStyle}
+                staticWebAttachButtonStyle={staticWebAttachButtonStyle}
                 renderAttachButtonIcon={renderAttachButtonIcon}
                 attachmentMenuItems={attachmentMenuItems}
                 addAttachmentLabel={t("composer.input.addAttachment")}
@@ -1883,6 +1957,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
                 isRealtimeVoiceForCurrentAgent={isRealtimeVoiceForCurrentAgent}
                 voiceMuteToggleKeys={voiceMuteToggleKeys}
                 dictationToggleKeys={dictationToggleKeys}
+                isDictating={isDictating}
               />
               {rightContent}
               <PrimaryAction
