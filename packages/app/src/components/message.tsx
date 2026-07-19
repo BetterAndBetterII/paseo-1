@@ -77,6 +77,7 @@ import type { MarkdownPhase } from "@/components/markdown/fence/types";
 import { splitMarkdownBlocks } from "@/utils/split-markdown-blocks";
 import { colorMarkdownLinkChildren } from "@/components/markdown/link-children";
 import { createAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
+import { selectMarkdownBlockWindow } from "@/utils/markdown-block-window";
 import { formatDuration, formatMessageTimestamp } from "@/utils/time";
 import { writeMarkdownToRichClipboard } from "@/utils/rich-clipboard";
 import { getDefaultMarkdownClipboardEnvironment } from "@/utils/rich-clipboard-default-environment";
@@ -788,6 +789,24 @@ export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
   containerCompactBottom: {
     paddingBottom: 0,
   },
+  blockWindowButton: {
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    minHeight: 32,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
+  },
+  blockWindowButtonText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+  },
+  blockWindowButtonIcon: {
+    color: theme.colors.foregroundMuted,
+  },
   imageFrame: {
     width: "100%",
     minHeight: 160,
@@ -1488,6 +1507,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   spacing = "default",
   phase,
 }: AssistantMessageProps) {
+  const { t } = useTranslation();
+  const [isFullyExpanded, setIsFullyExpanded] = useState(false);
   const markdownParser = useMemo(createAssistantMarkdownParser, []);
 
   const fileLinkActions = useAssistantFileLinkActions();
@@ -1932,6 +1953,11 @@ export const AssistantMessage = memo(function AssistantMessage({
     () => blocks.map((block, index) => ({ key: `block:${index}`, block })),
     [blocks],
   );
+  const blockWindow = useMemo(
+    () => selectMarkdownBlockWindow(keyedBlocks, isFullyExpanded),
+    [isFullyExpanded, keyedBlocks],
+  );
+  const handleExpandMessage = useCallback(() => setIsFullyExpanded(true), []);
 
   const assistantContainerStyle = useMemo(
     () => [
@@ -1946,19 +1972,39 @@ export const AssistantMessage = memo(function AssistantMessage({
 
   return (
     <View testID="assistant-message" style={assistantContainerStyle}>
-      {keyedBlocks.map(({ key, block }, index) => (
-        <AssistantMessageBlockContainer
-          key={key}
-          block={block}
-          marginBottom={index < keyedBlocks.length - 1 ? 12 : 0}
-        >
-          <MemoizedMarkdownBlock
-            text={block}
-            rules={markdownRules}
-            parser={markdownParser}
-            onLinkPress={handleMarkdownLinkPress}
-          />
-        </AssistantMessageBlockContainer>
+      {blockWindow.items.map(({ key, block }, index) => (
+        <React.Fragment key={key}>
+          {blockWindow.tailStartIndex === index ? (
+            <Pressable
+              testID="assistant-message-expand"
+              accessibilityRole="button"
+              accessibilityLabel={t("message.actions.showFullResponse", {
+                count: blockWindow.hiddenCount,
+              })}
+              onPress={handleExpandMessage}
+              style={assistantMessageStylesheet.blockWindowButton}
+            >
+              <ChevronDown
+                size={16}
+                color={assistantMessageStylesheet.blockWindowButtonIcon.color}
+              />
+              <Text style={assistantMessageStylesheet.blockWindowButtonText}>
+                {t("message.actions.showFullResponse", { count: blockWindow.hiddenCount })}
+              </Text>
+            </Pressable>
+          ) : null}
+          <AssistantMessageBlockContainer
+            block={block}
+            marginBottom={index < blockWindow.items.length - 1 ? 12 : 0}
+          >
+            <MemoizedMarkdownBlock
+              text={block}
+              rules={markdownRules}
+              parser={markdownParser}
+              onLinkPress={handleMarkdownLinkPress}
+            />
+          </AssistantMessageBlockContainer>
+        </React.Fragment>
       ))}
     </View>
   );

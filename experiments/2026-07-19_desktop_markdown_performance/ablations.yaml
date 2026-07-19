@@ -92,10 +92,11 @@ runs:
   - variant: long_message_block_virtualization
     priority: P0
     scale: full
-    status: design_explicit_bounded_mount
+    status: accepted
     change: explicitly mount a bounded head and tail block window for exceptionally long messages, with user-controlled full expansion
     reason: 256KiB mixed Markdown mounts 111358 DOM and 132619 non-ignored AX nodes, retains 2.37GB post-GC heap, and blocks feedback for 5.84s p95
     rejected_candidate: CSS content-visibility auto failed cleanup because the archived tab remained attached beyond 30 seconds on run four
+    result: cap stable promoted rows at 32 and mount at most 96 blocks in the remainder; feedback p95 improved 95 percent, Long Task 89 percent, DOM 98 percent, AX 98 percent, and post-GC heap 93 percent; expanded text hash matches baseline
 
   - variant: streamdown_web_renderer
     priority: P2
