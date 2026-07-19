@@ -105,6 +105,7 @@ import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 import { recordRenderProfileReasons } from "@/utils/render-profiler";
 import { useRetainedPanelActive } from "@/components/retained-panel";
+import { installMessageInteractionStyles } from "@/components/message-interaction-styles";
 import { useStreamHistoryWindow } from "./use-stream-history-window";
 
 function renderLiveAuxiliaryNode(input: {
@@ -316,6 +317,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     },
     ref,
   ) {
+    useEffect(() => installMessageInteractionStyles(), []);
     const { t } = useTranslation();
     const autoExpandReasoning = useSettings((settings) => settings.autoExpandReasoning);
     const toolCallDetailLevel = useSettings((settings) => settings.toolCallDetailLevel);

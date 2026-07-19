@@ -82,6 +82,10 @@ import { writeMarkdownToRichClipboard } from "@/utils/rich-clipboard";
 import { getDefaultMarkdownClipboardEnvironment } from "@/utils/rich-clipboard-default-environment";
 import { setAssistantMarkdownBlockHeight } from "@/utils/assistant-message-height-estimate";
 import { getAgentAttachmentPillContent } from "@/attachments/attachment-pill-content";
+import {
+  USER_MESSAGE_CONTENT_DATA_SET,
+  USER_MESSAGE_TRAILING_ROW_DATA_SET,
+} from "@/components/message-interaction-styles";
 import { PlanCard } from "./plan-card";
 import { useToolCallSheet } from "./tool-call-sheet";
 import { ToolCallDetailsContent } from "./tool-call-details";
@@ -433,22 +437,19 @@ export const UserMessage = memo(function UserMessage({
 }: UserMessageProps) {
   const isCompact = useIsCompactFormFactor();
   const { t } = useTranslation();
-  const [isHovered, setIsHovered] = useState(false);
   const [lightboxMetadata, setLightboxMetadata] = useState<UserMessageImageAttachment | null>(null);
   const handleLightboxClose = useCallback(() => setLightboxMetadata(null), []);
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
   const hasText = message.trim().length > 0;
   const hasImages = images.length > 0;
   const hasAttachments = attachments.length > 0;
-  const showTrailingRow = !isPending && hasText && (isCompact || isNative || isHovered);
+  const showTrailingRow = !isPending && hasText;
   const formattedTimestamp = useMemo(
     () => formatMessageTimestamp(new Date(timestamp)),
     [timestamp],
   );
   const rewindMutation = useRewindAgentMutation({ serverId, agentId, client, messageId });
 
-  const handlePointerEnter = useCallback(() => setIsHovered(true), []);
-  const handlePointerLeave = useCallback(() => setIsHovered(false), []);
   const getMessageContent = useCallback(() => message, [message]);
   const handleRewind = useCallback(
     (input: { mode: RewindMode; rewoundText: string }) => {
@@ -483,21 +484,14 @@ export const UserMessage = memo(function UserMessage({
     [hasText],
   );
   const trailingRowStyle = useMemo(
-    () => [
-      userMessageStylesheet.trailingRow,
-      showTrailingRow
-        ? userMessageStylesheet.trailingRowVisible
-        : userMessageStylesheet.trailingRowHidden,
-    ],
-    [showTrailingRow],
+    () => [userMessageStylesheet.trailingRow, userMessageStylesheet.trailingRowVisible],
+    [],
   );
-
   return (
     <View style={containerStyle} testID="user-message" aria-busy={isPending}>
       <View
         style={userMessageStylesheet.content}
-        onPointerEnter={handlePointerEnter}
-        onPointerLeave={handlePointerLeave}
+        dataSet={!isCompact && !isNative ? USER_MESSAGE_CONTENT_DATA_SET : undefined}
       >
         <View style={userMessageStylesheet.bubble}>
           {hasImages ? (
@@ -536,10 +530,10 @@ export const UserMessage = memo(function UserMessage({
             </Text>
           ) : null}
         </View>
-        {hasText ? (
+        {showTrailingRow ? (
           <View
             style={trailingRowStyle}
-            pointerEvents={showTrailingRow ? "auto" : "none"}
+            dataSet={USER_MESSAGE_TRAILING_ROW_DATA_SET}
             testID="user-message-trailing-row"
           >
             <Text style={userMessageStylesheet.timestampText} testID="user-message-timestamp">
