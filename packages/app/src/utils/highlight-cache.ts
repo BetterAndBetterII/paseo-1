@@ -46,10 +46,11 @@ export interface KeyedLine {
   tokens: KeyedToken[];
 }
 
-// Above this, highlighting a whole document on the main thread risks a visible
-// stall when a large Read/Write block is expanded. Callers fall back to plain
-// monospace text. Generous enough to cover the vast majority of real blocks.
-export const MAX_HIGHLIGHT_CHARS = 100_000;
+// Syntax tokens become one React/RN Web span each. Beyond this point the token
+// tree, layout, and accessibility tree cost much more than tokenization itself.
+// Keep the complete selectable/copyable code, but render it as one plain
+// monospace text node instead of mounting an unbounded token-span tree.
+export const MAX_HIGHLIGHT_CHARS = 16 * 1024;
 
 class LRUCache<K, V> {
   private readonly map = new Map<K, V>();

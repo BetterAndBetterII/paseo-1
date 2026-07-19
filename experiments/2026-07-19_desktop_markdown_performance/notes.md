@@ -67,3 +67,36 @@ end-to-end 只从 2,597ms 降到 2,502ms（-4%），max frame gap 从 81ms 升�
 
 v1 的 feedback timer 只在开始后 25ms 采一次，无法覆盖后半程同步工作。v2 保持语料不变，
 改为全流周期每 100ms 采样并记录 per-run p95/max；后续正式结论只使用 v2。
+
+## v2 baseline 与 rejected 未闭合 fence 候选
+
+正式 v2 baseline `20260719_225058__baseline_v2__fa554c` 显示：1MiB plain 的反馈
+p50/p95 为 28.2/40.4ms；64KiB open TypeScript fence 为 504.7/514.5ms；256KiB mixed
+Markdown 为 5,768.7/5,843.4ms。后两者最终分别挂载 29,132/111,358 DOM nodes 和
+58,550/132,619 non-ignored AX nodes；对应 post-GC heap p95 为 292.5MB/2.37GB。
+
+`20260719_225750__incomplete_fence_plain_during_stream__318f50` 只在 live head 的最后一个
+未闭合 fence 暂缓高亮，并在 turn 完成后恢复完整高亮。64KiB open fence 的 highlight calls
+从 2 降到 1、highlight p95 从 43.7ms 降到 28.3ms、end-to-end p95 从 1,071.2ms 降到
+800.8ms（-25%）、Long Task p95 从 862ms 降到 578ms（-33%）。但最终一次性构造同样的
+29,132 DOM / 58,550 AX nodes，max frame gap 从 540.1ms 升到 594.9ms（+10%），反馈
+p95 从 514.5ms 升到 557.6ms（+8%）。最终文本 hash 一致，heap +0.9%，但交互 gate 失败，
+因此该候选单独 rejected 并回滚。
+
+这次消融把根因进一步收窄到 token/span 与 RN Web/AX 节点挂载，而不是 tokenizer 本身。
+`bounded_code_rendering` 和 `long_message_block_virtualization` 据此从 P1/P2 提升为 P0。
+
+## accepted 有界代码 token tree
+
+`20260719_230348__bounded_code_rendering__e9a1a6` 将语法高亮上限从 100,000 字符收紧到
+16KiB；超过阈值仍渲染完整、可选择、可复制的 monospace 原文，只是不再构造逐 token span。
+64KiB open TypeScript fence 的 end-to-end p50/p95 从 1,056.7/1,071.2ms 降到
+206.8/208.1ms（p95 -80.6%），反馈从 504.7/514.5ms 降到 20.3/22.4ms（p95 -95.6%），
+Long Task 从 852/862ms 降到 0/0ms，max frame gap p95 从 540.1ms 降到 37.8ms。
+DOM 从 29,132 降到 11，non-ignored AX 从 58,550 降到 3,222，post-GC heap p95 从
+292.5MB 降到 157.4MB（-46.2%）。最终 rendered-text hash 与 baseline 完全一致。
+
+1MiB plain 和 256KiB mixed 不触发该阈值分支；两者 p50 基本同量级。5-run p95 各出现一个
+环境离群值（plain feedback +18%、mixed feedback +8%），但产品代码在这两个 control workload
+上的执行路径不变，且 mixed p50 反而从 5,768.7ms 降到 5,719.4ms。因此不把 control 噪声
+计入收益，也不据此否决目标 workload 上数量级、跨 DOM/AX/heap/Long Task 一致的改善。
