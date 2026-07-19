@@ -3,13 +3,12 @@ import {
   default as React,
   useCallback,
   useMemo,
-  useState,
   type ComponentType,
   type PropsWithChildren,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import type {
   PressableProps,
   PressableStateCallbackType,
@@ -23,6 +22,8 @@ import {
   createControlGeometry,
   type ButtonControlSize,
 } from "@/components/ui/control-geometry";
+import { ButtonHost } from "@/components/ui/button-host";
+import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 
 type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "destructive";
@@ -41,10 +42,13 @@ interface ButtonIconProps {
   iconColor: string;
 }
 
+const BUTTON_ICON_DATA_SET = { paseoButtonIcon: "true" } as const;
+const BUTTON_LABEL_DATA_SET = { paseoButtonLabel: "true" } as const;
+
 function ButtonIcon({ loading, leftIcon, iconSize, iconColor }: ButtonIconProps) {
   if (loading) {
     return (
-      <View>
+      <View dataSet={BUTTON_ICON_DATA_SET}>
         <LoadingSpinner size="small" color={iconColor} />
       </View>
     );
@@ -53,7 +57,7 @@ function ButtonIcon({ loading, leftIcon, iconSize, iconColor }: ButtonIconProps)
   if (!leftIcon) return null;
 
   if (typeof leftIcon === "object" && "type" in leftIcon) {
-    return <View>{leftIcon}</View>;
+    return <View dataSet={BUTTON_ICON_DATA_SET}>{leftIcon}</View>;
   }
 
   if (
@@ -61,12 +65,16 @@ function ButtonIcon({ loading, leftIcon, iconSize, iconColor }: ButtonIconProps)
     !leftIcon.prototype?.isReactComponent &&
     leftIcon.length > 0
   ) {
-    return <View>{(leftIcon as (color: string) => ReactElement)(iconColor)}</View>;
+    return (
+      <View dataSet={BUTTON_ICON_DATA_SET}>
+        {(leftIcon as (color: string) => ReactElement)(iconColor)}
+      </View>
+    );
   }
 
   const Icon = leftIcon as ComponentType<{ color: string; size: number }>;
   return (
-    <View>
+    <View dataSet={BUTTON_ICON_DATA_SET}>
       <Icon color={iconColor} size={iconSize} />
     </View>
   );
@@ -153,9 +161,6 @@ const styles = StyleSheet.create((theme) => {
     textGhost: {
       color: theme.colors.foregroundMuted,
     },
-    textGhostHovered: {
-      color: theme.colors.foreground,
-    },
   };
 });
 
@@ -171,6 +176,7 @@ export function Button({
   loading = false,
   accessibilityRole,
   accessibilityState: accessibilityStateProp,
+  dataSet: dataSetProp,
   ...props
 }: PropsWithChildren<
   Omit<PressableProps, "style"> & {
@@ -183,7 +189,6 @@ export function Button({
     loading?: boolean;
   }
 >) {
-  const [hovered, setHovered] = useState(false);
   const isDisabled = disabled || loading;
 
   let variantStyle: ViewStyle;
@@ -209,11 +214,6 @@ export function Button({
   } else {
     sizeStyle = styles.md;
   }
-  const isGhostHovered = hovered && variant === "ghost";
-
-  const handleHoverIn = useCallback(() => setHovered(true), []);
-  const handleHoverOut = useCallback(() => setHovered(false), []);
-
   const pressableStyle = useCallback(
     ({ pressed }: PressableStateCallbackType): StyleProp<ViewStyle> => [
       styles.base,
@@ -226,6 +226,11 @@ export function Button({
     [sizeStyle, variantStyle, isDisabled, style],
   );
 
+  const staticPressableStyle = useMemo<StyleProp<ViewStyle>>(
+    () => [styles.base, sizeStyle, variantStyle, isDisabled ? styles.disabled : null, style],
+    [sizeStyle, variantStyle, isDisabled, style],
+  );
+
   const resolvedTextStyle = useMemo(
     () => [
       styles.text,
@@ -234,14 +239,22 @@ export function Button({
       variant === "destructive" ? styles.textDestructive : null,
       variant === "ghost" ? styles.textGhost : null,
       textStyle,
-      isGhostHovered ? styles.textGhostHovered : null,
     ],
-    [size, variant, textStyle, isGhostHovered],
+    [size, variant, textStyle],
   );
 
   const accessibilityState = useMemo(
     () => ({ ...accessibilityStateProp, disabled: isDisabled, busy: loading }),
     [accessibilityStateProp, isDisabled, loading],
+  );
+
+  const buttonDataSet = useMemo(
+    () => ({
+      ...dataSetProp,
+      paseoButton: "true",
+      paseoButtonVariant: variant,
+    }),
+    [dataSetProp, variant],
   );
 
   function resolveIconMapping() {
@@ -252,20 +265,19 @@ export function Button({
       return destructiveForegroundIconMapping;
     }
     if (variant === "ghost") {
-      return isGhostHovered ? foregroundIconMapping : foregroundMutedIconMapping;
+      return foregroundMutedIconMapping;
     }
     return foregroundIconMapping;
   }
 
   return (
-    <Pressable
+    <ButtonHost
       {...props}
       accessibilityRole={accessibilityRole ?? "button"}
       accessibilityState={accessibilityState}
+      dataSet={buttonDataSet}
       disabled={isDisabled}
-      onHoverIn={handleHoverIn}
-      onHoverOut={handleHoverOut}
-      style={pressableStyle}
+      style={isWeb ? staticPressableStyle : pressableStyle}
     >
       <ThemedButtonIcon
         loading={loading}
@@ -273,8 +285,12 @@ export function Button({
         iconSize={buttonIconSize[size]}
         uniProps={resolveIconMapping()}
       />
-      {children != null ? <Text style={resolvedTextStyle}>{children}</Text> : null}
+      {children != null ? (
+        <Text dataSet={BUTTON_LABEL_DATA_SET} style={resolvedTextStyle}>
+          {children}
+        </Text>
+      ) : null}
       {trailing}
-    </Pressable>
+    </ButtonHost>
   );
 }
