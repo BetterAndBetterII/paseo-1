@@ -100,3 +100,8 @@ DOM 从 29,132 降到 11，non-ignored AX 从 58,550 降到 3,222，post-GC heap
 环境离群值（plain feedback +18%、mixed feedback +8%），但产品代码在这两个 control workload
 上的执行路径不变，且 mixed p50 反而从 5,768.7ms 降到 5,719.4ms。因此不把 control 噪声
 计入收益，也不据此否决目标 workload 上数量级、跨 DOM/AX/heap/Long Task 一致的改善。
+
+`20260719_231120__long_message_css_content_visibility__40916f` 尝试只在 web 为每个顶层 block
+应用 `content-visibility:auto`。候选在第 4 次 mixed run 后归档 agent 时，workspace tab 超过
+30 秒仍未 detached，整轮 3.5 分钟失败且没有可发布 metrics。该策略与现有列表高度缓存、
+滚动锚点或 retained tab 生命周期存在冲突，已 rejected 并完全回滚；后续改为显式有界挂载。

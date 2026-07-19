@@ -165,6 +165,7 @@ interface StreamRunSample {
   axNodes: number;
   axNonIgnoredNodes: number;
   renderedTextHash: string;
+  expandedRenderedTextHash: string;
 }
 
 function durationMetric(samples: number[]): BenchmarkMetricResult {
@@ -418,6 +419,7 @@ async function finishStreamProbe(
         axNodes: 0,
         axNonIgnoredNodes: 0,
         renderedTextHash,
+        expandedRenderedTextHash: renderedTextHash,
       };
     },
     {
@@ -444,6 +446,38 @@ async function readAxNodeCounts(
   };
 }
 
+async function expandLongAssistantMessageAndReadHash(
+  page: Page,
+  collapsedHash: string,
+): Promise<string> {
+  const expandButton = page.getByTestId("assistant-message-expand").last();
+  if ((await expandButton.count()) === 0) {
+    return collapsedHash;
+  }
+
+  await expandButton.click({ timeout: 60_000 });
+  await expandButton.waitFor({ state: "detached", timeout: 60_000 });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  return page.evaluate(async () => {
+    const assistantMessages = document.querySelectorAll<HTMLElement>(
+      '[data-testid="assistant-message"]',
+    );
+    const renderedText = Array.from(assistantMessages)
+      .map((element) => element.textContent ?? "")
+      .join("\n---assistant-message---\n");
+    const renderedBytes = new TextEncoder().encode(renderedText);
+    const renderedDigest = await crypto.subtle.digest("SHA-256", renderedBytes);
+    return Array.from(new Uint8Array(renderedDigest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+  });
+}
+
 function buildCase(input: {
   workload: MarkdownWorkload;
   messageBytes: number;
@@ -458,6 +492,14 @@ function buildCase(input: {
   if (renderedTextHashes.size !== 1) {
     throw new Error(`${workload}:${messageBytes} produced inconsistent rendered text hashes`);
   }
+  const expandedRenderedTextHashes = new Set(
+    samples.map((sample) => sample.expandedRenderedTextHash),
+  );
+  if (expandedRenderedTextHashes.size !== 1) {
+    throw new Error(
+      `${workload}:${messageBytes} produced inconsistent expanded rendered text hashes`,
+    );
+  }
   return {
     id: `${workload}-${messageBytes}-bytes`,
     dimensions: {
@@ -467,6 +509,7 @@ function buildCase(input: {
       providerChunkCount: Math.ceil(messageBytes / CHUNK_BYTES),
       measuredRuns: samples.length,
       renderedTextHash: samples[0]?.renderedTextHash ?? "missing",
+      expandedRenderedTextHash: samples[0]?.expandedRenderedTextHash ?? "missing",
     },
     metrics: {
       endToEnd: durationMetric(samples.map((sample) => sample.endToEndMs)),
@@ -554,10 +597,16 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
         });
         const ax = await readAxNodeCounts(cdp);
         await cdp.send("HeapProfiler.collectGarbage");
+        const postGcHeapBytes = await readHeap(page);
+        const expandedRenderedTextHash = await expandLongAssistantMessageAndReadHash(
+          page,
+          sample.renderedTextHash,
+        );
         samples.push({
           ...sample,
           ...ax,
-          postGcHeapBytes: await readHeap(page),
+          postGcHeapBytes,
+          expandedRenderedTextHash,
         });
         await workspace.client.archiveAgent(created.id);
         await page.getByTestId(`workspace-tab-agent_${created.id}`).waitFor({
@@ -581,8 +630,8 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
         feedbackSampleIntervalMs: FEEDBACK_SAMPLE_INTERVAL_MS,
         viewportWidth: VIEWPORT.width,
         viewportHeight: VIEWPORT.height,
-        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v2" : null,
-        scorerVersion: isMarkdownBenchmark ? "desktop_markdown_metrics_v2" : null,
+        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v3" : null,
+        scorerVersion: isMarkdownBenchmark ? "desktop_markdown_metrics_v3" : null,
       },
       cases,
     } satisfies BenchmarkTaskResult;
