@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import type { BrowserContext, Page } from "@playwright/test";
+import type { BrowserContext, CDPSession, Page } from "@playwright/test";
 import { summarizeSamples } from "../../../scripts/benchmarks/stats";
 import type {
   BenchmarkCaseResult,
@@ -13,11 +13,70 @@ import { buildAgentRoute } from "./helpers/mock-agent";
 import { getServerId } from "./helpers/server-id";
 import { seedWorkspace, type SeededWorkspace } from "./helpers/seed-client";
 
-const MESSAGE_SIZES_BYTES = [64 * 1024, 256 * 1024, 1024 * 1024] as const;
+const STREAM_MESSAGE_SIZES_BYTES = [64 * 1024, 256 * 1024, 1024 * 1024] as const;
 const CHUNK_BYTES = 512;
-const MEASURED_RUNS = 5;
+const DEFAULT_MEASURED_RUNS = 5;
 const FEEDBACK_TARGET_DELAY_MS = 25;
 const VIEWPORT = { width: 1440, height: 900 };
+const isMarkdownBenchmark = process.env.PASEO_MARKDOWN_BENCHMARK === "1";
+
+const MARKDOWN_WORKLOADS = [
+  "plain_unbroken",
+  "prose_blocks",
+  "open_typescript_fence",
+  "closed_typescript_fences",
+  "mixed_markdown",
+  "link_table_dense",
+] as const;
+
+type MarkdownWorkload = (typeof MARKDOWN_WORKLOADS)[number];
+
+interface StreamBenchmarkCase {
+  workload: MarkdownWorkload;
+  messageBytes: number;
+}
+
+const DEFAULT_MARKDOWN_CASES: StreamBenchmarkCase[] = MARKDOWN_WORKLOADS.flatMap((workload) =>
+  STREAM_MESSAGE_SIZES_BYTES.map((messageBytes) => ({ workload, messageBytes })),
+);
+
+function parseMeasuredRuns(): number {
+  const configured = Number(process.env.PASEO_MARKDOWN_BENCHMARK_RUNS ?? DEFAULT_MEASURED_RUNS);
+  if (!Number.isInteger(configured) || configured <= 0) {
+    throw new Error("PASEO_MARKDOWN_BENCHMARK_RUNS must be a positive integer");
+  }
+  return configured;
+}
+
+function isMarkdownWorkload(value: string): value is MarkdownWorkload {
+  return MARKDOWN_WORKLOADS.some((workload) => workload === value);
+}
+
+function parseMarkdownCases(): StreamBenchmarkCase[] {
+  const configured = process.env.PASEO_MARKDOWN_BENCHMARK_CASES;
+  if (!configured) {
+    return DEFAULT_MARKDOWN_CASES;
+  }
+  return configured.split(",").map((entry) => {
+    const [workloadValue, messageBytesValue] = entry.split(":");
+    const messageBytes = Number(messageBytesValue);
+    if (!workloadValue || !isMarkdownWorkload(workloadValue)) {
+      throw new Error(`unknown Markdown benchmark workload: ${workloadValue ?? ""}`);
+    }
+    if (!Number.isInteger(messageBytes) || messageBytes <= 0 || messageBytes > 1024 * 1024) {
+      throw new Error(`invalid Markdown benchmark message size: ${messageBytesValue ?? ""}`);
+    }
+    return { workload: workloadValue, messageBytes };
+  });
+}
+
+const MEASURED_RUNS = isMarkdownBenchmark ? parseMeasuredRuns() : DEFAULT_MEASURED_RUNS;
+const STREAM_CASES: StreamBenchmarkCase[] = isMarkdownBenchmark
+  ? parseMarkdownCases()
+  : STREAM_MESSAGE_SIZES_BYTES.map((messageBytes) => ({
+      workload: "plain_unbroken",
+      messageBytes,
+    }));
 
 interface FlushProfileSample {
   agentId: string;
@@ -32,6 +91,20 @@ interface FlushProfileSample {
 interface RenderProfileSample {
   actualDuration: number;
   commitTime: number;
+}
+
+interface MarkdownParseProfileSample {
+  sourceChars: number;
+  durationMs: number;
+  tokens: number;
+}
+
+interface HighlightProfileSample {
+  codeChars: number;
+  durationMs: number;
+  cacheHit: boolean;
+  lines: number;
+  tokens: number;
 }
 
 interface StreamProbe {
@@ -55,6 +128,8 @@ interface BenchmarkWindow extends Window {
   __PASEO_RENDER_PROFILE__?: RenderProfileSample[];
   __PASEO_RESET_RENDER_PROFILE__?: () => void;
   __PASEO_STREAM_BENCHMARK_PROBE__?: StreamProbe;
+  __PASEO_MARKDOWN_PARSE_PROFILE__?: MarkdownParseProfileSample[];
+  __PASEO_HIGHLIGHT_PROFILE__?: HighlightProfileSample[];
 }
 
 interface StreamRunSample {
@@ -74,7 +149,18 @@ interface StreamRunSample {
   maxFrameGapMs: number;
   feedbackDelayMs: number;
   heapDeltaBytes: number;
+  postGcHeapBytes: number;
   markdownBytes: number;
+  markdownParseCalls: number;
+  markdownParseDurationMs: number;
+  highlightCalls: number;
+  highlightCacheHits: number;
+  highlightDurationMs: number;
+  highlightedTokens: number;
+  assistantDomNodes: number;
+  axNodes: number;
+  axNonIgnoredNodes: number;
+  renderedTextHash: string;
 }
 
 function durationMetric(samples: number[]): BenchmarkMetricResult {
@@ -119,6 +205,8 @@ async function seedBenchmarkStorage(context: BrowserContext): Promise<void> {
       localStorage.setItem("@paseo:create-agent-preferences", JSON.stringify(seededPreferences));
       localStorage.removeItem("@paseo:settings");
       (window as BenchmarkWindow).__PASEO_AGENT_STREAM_FLUSH_PROFILE__ = [];
+      (window as BenchmarkWindow).__PASEO_MARKDOWN_PARSE_PROFILE__ = [];
+      (window as BenchmarkWindow).__PASEO_HIGHLIGHT_PROFILE__ = [];
     },
     { seededDaemon: daemon, seededPreferences: preferences },
   );
@@ -153,6 +241,8 @@ async function armStreamProbe(page: Page): Promise<void> {
     const state = window as BenchmarkWindow;
     state.__PASEO_AGENT_STREAM_FLUSH_PROFILE__ = [];
     state.__PASEO_RESET_RENDER_PROFILE__?.();
+    state.__PASEO_MARKDOWN_PARSE_PROFILE__ = [];
+    state.__PASEO_HIGHLIGHT_PROFILE__ = [];
 
     const startedAt = performance.now();
     const longTasks: PerformanceEntry[] = [];
@@ -223,11 +313,11 @@ async function waitForAssistantBytes(page: Page, expectedBytes: number): Promise
 
 async function finishStreamProbe(
   page: Page,
-  input: { expectedBytes: number; heapBefore: number },
+  input: { expectedBytes: number; heapBefore: number; verifyPlainText: boolean },
 ): Promise<StreamRunSample> {
   const heapAfter = await readHeap(page);
   return page.evaluate(
-    ({ expectedBytes, heapBefore, heapAfterValue }) => {
+    async ({ expectedBytes, heapBefore, heapAfterValue, verifyPlainText }) => {
       const state = window as BenchmarkWindow;
       const probe = state.__PASEO_STREAM_BENCHMARK_PROBE__;
       if (!probe) throw new Error("stream benchmark probe was not armed");
@@ -251,11 +341,25 @@ async function finishStreamProbe(
       const markdownText = latestAssistant?.textContent ?? "";
       let markdownBytes = 0;
       while (markdownText.charCodeAt(markdownBytes) === 120) markdownBytes += 1;
-      if (markdownBytes !== expectedBytes) {
+      if (verifyPlainText && markdownBytes !== expectedBytes) {
         throw new Error(
           `assistant Markdown has ${markdownBytes} streamed bytes, expected ${expectedBytes}`,
         );
       }
+      if (!verifyPlainText) {
+        markdownBytes = flushes.reduce((sum, sample) => sum + sample.assistantBytes, 0);
+      }
+
+      const renderedText = Array.from(assistantMessages)
+        .map((element) => element.textContent ?? "")
+        .join("\n---assistant-message---\n");
+      const renderedBytes = new TextEncoder().encode(renderedText);
+      const renderedDigest = await crypto.subtle.digest("SHA-256", renderedBytes);
+      const renderedTextHash = Array.from(new Uint8Array(renderedDigest), (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join("");
+      const markdownParseProfile = state.__PASEO_MARKDOWN_PARSE_PROFILE__ ?? [];
+      const highlightProfile = state.__PASEO_HIGHLIGHT_PROFILE__ ?? [];
 
       const commitTimes = new Set(renderSamples.map((sample) => sample.commitTime));
       return {
@@ -275,25 +379,73 @@ async function finishStreamProbe(
         maxFrameGapMs: Math.max(0, ...probe.frameGaps),
         feedbackDelayMs: Math.max(0, feedbackAt - probe.feedbackTargetAt),
         heapDeltaBytes: heapAfterValue - heapBefore,
+        postGcHeapBytes: 0,
         markdownBytes,
+        markdownParseCalls: markdownParseProfile.length,
+        markdownParseDurationMs: markdownParseProfile.reduce(
+          (sum, sample) => sum + sample.durationMs,
+          0,
+        ),
+        highlightCalls: highlightProfile.length,
+        highlightCacheHits: highlightProfile.filter((sample) => sample.cacheHit).length,
+        highlightDurationMs: highlightProfile.reduce((sum, sample) => sum + sample.durationMs, 0),
+        highlightedTokens: highlightProfile.reduce((sum, sample) => sum + sample.tokens, 0),
+        assistantDomNodes: Array.from(assistantMessages).reduce(
+          (sum, element) => sum + element.querySelectorAll("*").length + 1,
+          0,
+        ),
+        axNodes: 0,
+        axNonIgnoredNodes: 0,
+        renderedTextHash,
       };
     },
-    { expectedBytes: input.expectedBytes, heapBefore: input.heapBefore, heapAfterValue: heapAfter },
+    {
+      expectedBytes: input.expectedBytes,
+      heapBefore: input.heapBefore,
+      heapAfterValue: heapAfter,
+      verifyPlainText: input.verifyPlainText,
+    },
   );
 }
 
-function buildCase(messageBytes: number, samples: StreamRunSample[]): BenchmarkCaseResult {
+async function readAxNodeCounts(
+  cdp: CDPSession,
+): Promise<{ axNodes: number; axNonIgnoredNodes: number }> {
+  await cdp.send("Accessibility.enable");
+  const tree = (await cdp.send("Accessibility.getFullAXTree")) as {
+    nodes?: Array<{ ignored?: boolean }>;
+  };
+  await cdp.send("Accessibility.disable");
+  const nodes = tree.nodes ?? [];
+  return {
+    axNodes: nodes.length,
+    axNonIgnoredNodes: nodes.filter((node) => node.ignored !== true).length,
+  };
+}
+
+function buildCase(input: {
+  workload: MarkdownWorkload;
+  messageBytes: number;
+  samples: StreamRunSample[];
+}): BenchmarkCaseResult {
+  const { workload, messageBytes, samples } = input;
   const reducerFlushDurations = samples.flatMap((sample) => sample.reducerFlushDurationsMs);
   const chunksPerFlush = samples.flatMap((sample) => sample.chunksPerFlush);
   const bytesPerFlush = samples.flatMap((sample) => sample.bytesPerFlush);
   const maxRuns = samples.flatMap((sample) => sample.maxContiguousRunPerFlush);
+  const renderedTextHashes = new Set(samples.map((sample) => sample.renderedTextHash));
+  if (renderedTextHashes.size !== 1) {
+    throw new Error(`${workload}:${messageBytes} produced inconsistent rendered text hashes`);
+  }
   return {
-    id: `${messageBytes}-bytes`,
+    id: `${workload}-${messageBytes}-bytes`,
     dimensions: {
+      workload,
       messageBytes,
       chunkBytes: CHUNK_BYTES,
       providerChunkCount: Math.ceil(messageBytes / CHUNK_BYTES),
       measuredRuns: samples.length,
+      renderedTextHash: samples[0]?.renderedTextHash ?? "missing",
     },
     metrics: {
       endToEnd: durationMetric(samples.map((sample) => sample.endToEndMs)),
@@ -312,7 +464,19 @@ function buildCase(messageBytes: number, samples: StreamRunSample[]): BenchmarkC
       maxFrameGap: durationMetric(samples.map((sample) => sample.maxFrameGapMs)),
       feedbackDelay: durationMetric(samples.map((sample) => sample.feedbackDelayMs)),
       heapDelta: bytesMetric(samples.map((sample) => sample.heapDeltaBytes)),
+      postGcHeap: bytesMetric(samples.map((sample) => sample.postGcHeapBytes)),
       markdownBytes: bytesMetric(samples.map((sample) => sample.markdownBytes)),
+      markdownParseCalls: countMetric(samples.map((sample) => sample.markdownParseCalls)),
+      markdownParseDuration: durationMetric(
+        samples.map((sample) => sample.markdownParseDurationMs),
+      ),
+      highlightCalls: countMetric(samples.map((sample) => sample.highlightCalls)),
+      highlightCacheHits: countMetric(samples.map((sample) => sample.highlightCacheHits)),
+      highlightDuration: durationMetric(samples.map((sample) => sample.highlightDurationMs)),
+      highlightedTokens: countMetric(samples.map((sample) => sample.highlightedTokens)),
+      assistantDomNodes: countMetric(samples.map((sample) => sample.assistantDomNodes)),
+      axNodes: countMetric(samples.map((sample) => sample.axNodes)),
+      axNonIgnoredNodes: countMetric(samples.map((sample) => sample.axNonIgnoredNodes)),
     },
   };
 }
@@ -335,14 +499,15 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
     workspace = await seedWorkspace({ repoPrefix: "desktop-streaming-benchmark-" });
 
     const cases: BenchmarkCaseResult[] = [];
-    for (const messageBytes of MESSAGE_SIZES_BYTES) {
+    for (const benchmarkCase of STREAM_CASES) {
+      const { workload, messageBytes } = benchmarkCase;
       const samples: StreamRunSample[] = [];
       for (let run = 0; run < MEASURED_RUNS; run += 1) {
         const created = await workspace.client.createAgent({
           provider: "mock",
           cwd: workspace.repoPath,
           workspaceId: workspace.workspaceId,
-          title: `Desktop stream ${messageBytes} run ${run}`,
+          title: `Desktop ${workload} ${messageBytes} run ${run}`,
           modeId: "load-test",
           model: "ten-second-stream",
         });
@@ -350,29 +515,40 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
         await cdp.send("HeapProfiler.collectGarbage");
         const heapBefore = await readHeap(page);
         await armStreamProbe(page);
-        await workspace.client.sendAgentMessage(
-          created.id,
-          `emit ${messageBytes} byte coalesced assistant stream in ${CHUNK_BYTES} byte chunks every 1 ms`,
-        );
+        const prompt = isMarkdownBenchmark
+          ? `emit ${messageBytes} byte markdown benchmark ${workload} in ${CHUNK_BYTES} byte chunks every 1 ms`
+          : `emit ${messageBytes} byte coalesced assistant stream in ${CHUNK_BYTES} byte chunks every 1 ms`;
+        await workspace.client.sendAgentMessage(created.id, prompt);
         const result = await workspace.client.waitForFinish(created.id, 60_000);
         if (result.status !== "idle") {
           throw new Error(`stream benchmark agent ${created.id} finished as ${result.status}`);
         }
         await waitForAssistantBytes(page, messageBytes);
-        samples.push(await finishStreamProbe(page, { expectedBytes: messageBytes, heapBefore }));
+        const sample = await finishStreamProbe(page, {
+          expectedBytes: messageBytes,
+          heapBefore,
+          verifyPlainText: !isMarkdownBenchmark,
+        });
+        const ax = await readAxNodeCounts(cdp);
+        await cdp.send("HeapProfiler.collectGarbage");
+        samples.push({
+          ...sample,
+          ...ax,
+          postGcHeapBytes: await readHeap(page),
+        });
         await workspace.client.archiveAgent(created.id);
         await page.getByTestId(`workspace-tab-agent_${created.id}`).waitFor({
           state: "detached",
           timeout: 30_000,
         });
       }
-      cases.push(buildCase(messageBytes, samples));
+      cases.push(buildCase({ workload, messageBytes, samples }));
     }
     await cdp.detach();
 
     const result = {
       schemaVersion: 1,
-      taskId: "desktop-streaming",
+      taskId: isMarkdownBenchmark ? "desktop-markdown" : "desktop-streaming",
       generatedAt: new Date().toISOString(),
       metadata: {
         runtime: "chromium-electron-overlay",
@@ -381,6 +557,7 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
         feedbackTargetDelayMs: FEEDBACK_TARGET_DELAY_MS,
         viewportWidth: VIEWPORT.width,
         viewportHeight: VIEWPORT.height,
+        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v1" : null,
       },
       cases,
     } satisfies BenchmarkTaskResult;

@@ -736,6 +736,45 @@ interface AssistantMessageProps {
   spacing?: "default" | "compactTop" | "compactBottom" | "compactBoth";
 }
 
+interface MarkdownParseProfileSample {
+  sourceChars: number;
+  durationMs: number;
+  tokens: number;
+}
+
+declare global {
+  var __PASEO_MARKDOWN_PARSE_PROFILE__: MarkdownParseProfileSample[] | undefined;
+}
+
+function createAssistantMarkdownParser(): ReturnType<typeof MarkdownIt> {
+  const parser = MarkdownIt({ typographer: true, linkify: true });
+  const defaultValidateLink = parser.validateLink.bind(parser);
+  parser.validateLink = (url: string) => {
+    if (url.trim().toLowerCase().startsWith("file://")) {
+      return true;
+    }
+
+    return defaultValidateLink(url);
+  };
+
+  const defaultParse = parser.parse.bind(parser);
+  parser.parse = (source: string, env: unknown) => {
+    const profile = globalThis.__PASEO_MARKDOWN_PARSE_PROFILE__;
+    if (!profile) {
+      return defaultParse(source, env);
+    }
+    const startedAt = performance.now();
+    const tokens = defaultParse(source, env);
+    profile.push({
+      sourceChars: source.length,
+      durationMs: performance.now() - startedAt,
+      tokens: tokens.length,
+    });
+    return tokens;
+  };
+  return parser;
+}
+
 export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
   container: {
     paddingVertical: theme.spacing[3],
@@ -1579,18 +1618,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   client,
   spacing = "default",
 }: AssistantMessageProps) {
-  const markdownParser = useMemo(() => {
-    const parser = MarkdownIt({ typographer: true, linkify: true });
-    const defaultValidateLink = parser.validateLink.bind(parser);
-    parser.validateLink = (url: string) => {
-      if (url.trim().toLowerCase().startsWith("file://")) {
-        return true;
-      }
-
-      return defaultValidateLink(url);
-    };
-    return parser;
-  }, []);
+  const markdownParser = useMemo(createAssistantMarkdownParser, []);
 
   const fileLinkActions = useAssistantFileLinkActions();
   const handleMarkdownLinkPress = useStableEvent((url: string) => {
