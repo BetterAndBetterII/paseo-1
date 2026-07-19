@@ -1,7 +1,7 @@
 import type { StreamItem } from "@/types/stream";
 import { estimateAssistantMessageHeightFromCache } from "@/utils/assistant-message-height-estimate";
 
-export const DEFAULT_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD = 100;
+export const DEFAULT_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD = 50;
 export const DEFAULT_WEB_MOUNTED_RECENT_STREAM_ITEMS = 50;
 const COLLAPSED_TOOL_SEQUENCE_ROW_HEIGHT_ESTIMATE = 40;
 
