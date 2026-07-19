@@ -154,6 +154,7 @@ import {
   getIsElectron,
 } from "@/constants/platform";
 import { getDesktopHost } from "@/desktop/host";
+import { installSidebarProjectRowInteractionStyles } from "@/components/sidebar/sidebar-project-row-interaction-styles";
 import { OpenInFileManagerMenuItem } from "@/workspace/open-in-file-manager/menu-item";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import type { HostBadgeModel } from "@/hosts/appearance";
@@ -165,6 +166,21 @@ const workspaceKeyExtractor = (workspace: SidebarWorkspacePlacement) => workspac
 const projectViewKeyExtractor = (project: SidebarProjectEntry) => project.viewKey;
 
 const WORKSPACE_STATUS_DOT_WIDTH = 14;
+const sidebarProjectLeadingVisualDataSet = { sidebarProjectLeadingVisual: "true" } as const;
+const sidebarProjectLeadingExpandDataSet = {
+  sidebarProjectLeadingVisual: "true",
+  sidebarProjectChevron: "expand",
+} as const;
+const sidebarProjectLeadingCollapseDataSet = {
+  sidebarProjectLeadingVisual: "true",
+  sidebarProjectChevron: "collapse",
+} as const;
+const sidebarProjectHoverActionDataSet = { sidebarProjectHoverAction: "true" } as const;
+const sidebarProjectRowDataSet = { sidebarProjectRow: "true", sidebarProjectDragging: "false" };
+const sidebarDraggingProjectRowDataSet = {
+  sidebarProjectRow: "true",
+  sidebarProjectDragging: "true",
+};
 const ThemedExternalLink = withUnistyles(ExternalLink);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
@@ -455,6 +471,7 @@ function ProjectRowTrailingActions({
   removeProjectStatus: "idle" | "pending" | "success";
 }) {
   const actionsVisible = isHovered || platformIsNative || isMobileBreakpoint;
+  const revealWithDesktopCss = platformIsWeb && !actionsVisible;
   return (
     <View style={styles.projectTrailingActions}>
       {worktreeTarget ? (
@@ -462,14 +479,16 @@ function ProjectRowTrailingActions({
           displayName={displayName}
           onPress={onBeginWorkspaceSetup}
           visible={actionsVisible}
+          revealWithDesktopCss={revealWithDesktopCss}
           showShortcutHint={isProjectActive}
           testID={`sidebar-project-new-worktree-${projectViewKey}`}
         />
       ) : null}
       {onRemoveProject ? (
         <View
+          dataSet={revealWithDesktopCss ? sidebarProjectHoverActionDataSet : undefined}
           style={!actionsVisible && styles.projectKebabButtonHidden}
-          pointerEvents={actionsVisible ? "auto" : "none"}
+          pointerEvents={actionsVisible || revealWithDesktopCss ? "auto" : "none"}
         >
           <ProjectKebabMenu
             projectViewKey={projectViewKey}
@@ -732,6 +751,7 @@ function NewWorktreeButton({
   displayName,
   onPress,
   visible,
+  revealWithDesktopCss = false,
   loading = false,
   testID,
   showShortcutHint = false,
@@ -739,6 +759,7 @@ function NewWorktreeButton({
   displayName: string;
   onPress: () => void;
   visible: boolean;
+  revealWithDesktopCss?: boolean;
   loading?: boolean;
   testID: string;
   showShortcutHint?: boolean;
@@ -764,11 +785,19 @@ function NewWorktreeButton({
   );
 
   return (
-    <View style={styles.projectTrailingControlSlot} pointerEvents={visible ? "auto" : "none"}>
+    <View
+      style={styles.projectTrailingControlSlot}
+      pointerEvents={visible || revealWithDesktopCss ? "auto" : "none"}
+    >
       <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
-        <TooltipTrigger asChild disabled={!visible}>
+        <TooltipTrigger asChild disabled={!visible && !revealWithDesktopCss}>
           <Pressable
-            style={pressableStyle}
+            dataSet={revealWithDesktopCss ? sidebarProjectHoverActionDataSet : undefined}
+            style={
+              revealWithDesktopCss
+                ? [styles.projectIconActionButton, !visible && styles.projectIconActionButtonHidden]
+                : pressableStyle
+            }
             onPress={handlePress}
             disabled={loading}
             accessibilityRole={platformIsWeb ? undefined : "button"}
@@ -897,6 +926,7 @@ function ProjectHeaderRow({
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const useCssRowFeedback = platformIsWeb;
   const isMobileBreakpoint = useIsCompactFormFactor();
   const localDaemonServerId = useLocalDaemonServerId();
   const projectPath = resolveSidebarProjectLocalPath(project, localDaemonServerId);
@@ -935,9 +965,13 @@ function ProjectHeaderRow({
   }, [interaction.didLongPressRef, onPress]);
 
   const handlePointerEnter = useCallback(() => {
-    if (!contextMenuOpen) setIsHovered(true);
-  }, [contextMenuOpen]);
-  const handlePointerLeave = useCallback(() => setIsHovered(false), []);
+    if (useCssRowFeedback || contextMenuOpen) return;
+    setIsHovered(true);
+  }, [contextMenuOpen, useCssRowFeedback]);
+  const handlePointerLeave = useCallback(() => {
+    if (useCssRowFeedback) return;
+    setIsHovered(false);
+  }, [useCssRowFeedback]);
   const handleContextMenuOpenChange = useCallback((open: boolean) => {
     setContextMenuOpen(open);
     if (open) setIsHovered(false);
@@ -954,16 +988,30 @@ function ProjectHeaderRow({
     interaction.handlePressOut();
   }, [interaction]);
 
-  const projectRowStyle = useCallback(
-    ({ pressed }: PressableStateCallbackType) => [
+  const projectRowBaseStyle = useMemo(
+    () => [
       styles.projectRow,
       isDragging && styles.projectRowDragging,
       selected && styles.sidebarRowSelected,
+    ],
+    [isDragging, selected],
+  );
+  const projectRowNativeStyle = useCallback(
+    ({ pressed }: PressableStateCallbackType) => [
+      projectRowBaseStyle,
       isHovered && styles.projectRowHovered,
       pressed && styles.projectRowPressed,
     ],
-    [isDragging, selected, isHovered],
+    [isHovered, projectRowBaseStyle],
   );
+  const projectRowStyle = useCssRowFeedback ? projectRowBaseStyle : projectRowNativeStyle;
+  const projectRowDataSet = isDragging ? sidebarDraggingProjectRowDataSet : sidebarProjectRowDataSet;
+  const leadingVisualDataSet =
+    chevron === "expand"
+      ? sidebarProjectLeadingExpandDataSet
+      : chevron === "collapse"
+        ? sidebarProjectLeadingCollapseDataSet
+        : sidebarProjectLeadingVisualDataSet;
 
   const rowChildren = (
     <>
@@ -973,9 +1021,15 @@ function ProjectHeaderRow({
           iconDataUri={iconDataUri}
           statusBucket={statusBucket}
           projectViewKey={project.viewKey}
-          backdrop={getSidebarRowBackdrop({ isDragging, isPressed, selected, isHovered })}
+          backdrop={getSidebarRowBackdrop({
+            isDragging,
+            isPressed,
+            selected,
+            isHovered: useCssRowFeedback ? false : isHovered,
+          })}
           chevron={chevron}
-          showChevron={isHovered && chevron !== null}
+          showChevron={!useCssRowFeedback && isHovered && chevron !== null}
+          dataSet={leadingVisualDataSet}
           isArchiving={isArchiving}
         />
 
@@ -1017,6 +1071,7 @@ function ProjectHeaderRow({
       >
         <PressHighlight
           accessibilityRole="button"
+          dataSet={projectRowDataSet}
           style={projectRowStyle}
           highlightStyle={styles.projectRowPressed}
           onPressIn={handleProjectPressIn}
@@ -1043,6 +1098,7 @@ function ProjectHeaderRow({
         <ContextMenuTrigger
           enabledOnMobile={false}
           accessibilityRole="button"
+          dataSet={projectRowDataSet}
           style={projectRowStyle}
           highlightStyle={styles.projectRowPressed}
           onPressIn={handleProjectPressIn}
@@ -1953,6 +2009,7 @@ export function SidebarWorkspaceList({
   parentGestureRef,
   dragGestureHostPresented,
 }: SidebarWorkspaceListProps) {
+  useEffect(() => installSidebarProjectRowInteractionStyles(), []);
   const pathname = usePathname();
   const hosts = useHosts();
   const rowItems = useSidebarRowItems();

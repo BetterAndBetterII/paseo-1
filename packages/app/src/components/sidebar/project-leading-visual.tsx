@@ -61,6 +61,7 @@ export function ProjectLeadingVisual({
   backdrop,
   chevron = null,
   showChevron = false,
+  dataSet,
   isArchiving = false,
 }: {
   displayName: string;
@@ -72,11 +73,12 @@ export function ProjectLeadingVisual({
   backdrop: SidebarSurfaceBackdrop;
   chevron?: "expand" | "collapse" | null;
   showChevron?: boolean;
+  dataSet?: Readonly<Record<string, string>>;
   isArchiving?: boolean;
 }) {
   if (showChevron && chevron !== null) {
     return (
-      <View style={styles.projectLeadingVisualSlot}>
+      <View dataSet={dataSet} style={styles.projectLeadingVisualSlot}>
         <ProjectInlineChevron chevron={chevron} />
       </View>
     );
@@ -84,7 +86,11 @@ export function ProjectLeadingVisual({
 
   if (isArchiving) {
     return (
-      <View style={styles.projectLeadingVisualSlot} testID="project-status-indicator-archiving">
+      <View
+        dataSet={dataSet}
+        style={styles.projectLeadingVisualSlot}
+        testID="project-status-indicator-archiving"
+      >
         <ThemedActivityIndicator size={8} uniProps={foregroundMutedColorMapping} />
       </View>
     );
@@ -97,6 +103,7 @@ export function ProjectLeadingVisual({
       projectViewKey={projectViewKey}
       statusBucket={statusBucket}
       backdrop={backdrop}
+      dataSet={dataSet}
     />
   );
 }
@@ -112,6 +119,7 @@ export function ProjectStatusIndicator({
   projectViewKey,
   statusBucket,
   backdrop,
+  dataSet,
   loading = false,
   testID,
 }: {
@@ -121,6 +129,7 @@ export function ProjectStatusIndicator({
   statusBucket: SidebarStateBucket | null;
   /** The row's current background, so the status badge can knock out of it. */
   backdrop: SidebarSurfaceBackdrop;
+  dataSet?: Readonly<Record<string, string>>;
   loading?: boolean;
   testID?: string;
 }) {
@@ -135,6 +144,7 @@ export function ProjectStatusIndicator({
 
   return (
     <View
+      dataSet={dataSet}
       style={styles.projectLeadingVisualSlot}
       testID={
         testID ??
