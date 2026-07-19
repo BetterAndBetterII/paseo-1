@@ -1,0 +1,2 @@
+{"item_id":"h176_8tabs_3cycles","operation":"open_full_history_then_cycle_tabs","workspace":"H176","history_agents":8,"projected_items_per_agent":176,"switch_cycles":3,"tags":["desktop","tab-switch","timeline","retained-panels"]}
+{"item_id":"markdown_1m_open_typescript","operation":"open_agent_and_wait_for_prompt_and_code","payload_bytes":1048576,"workload":"open_typescript_fence","tags":["desktop","markdown","code","long-message"]}

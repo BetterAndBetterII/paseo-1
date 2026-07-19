@@ -1,0 +1,11 @@
+{
+  "benchmark_id": "desktop_version_fixture",
+  "version": "v1",
+  "status": "released",
+  "items_hash": "sha256:b830e2a45cfae9b1f205234ef9beb29106028946a05639d40a88e0288f2ce561",
+  "labels_hash": "sha256:a3f8444d5d0f9da458e040a0aaa9599882aad4ced7a938b05a71d9d0d243d225",
+  "rubric_version": "desktop_version_correctness_v1",
+  "scorer_version": "desktop_version_metrics_v1",
+  "num_items": 2,
+  "created_at": "2026-07-20T01:27:11+08:00"
+}

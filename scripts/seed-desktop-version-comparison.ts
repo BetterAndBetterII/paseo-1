@@ -134,7 +134,7 @@ interface AgentFixture {
   title: string;
   projectedItems: number;
   canonicalSeqCount: number;
-  role: "history" | "markdown" | "large-diff" | "light";
+  role: "history" | "markdown" | "markdown-cold" | "large-diff" | "light";
 }
 
 interface WorkspaceFixture {
@@ -495,6 +495,21 @@ async function seedLightWorkspace(input: {
       `desktop-version-light-${label}-turn-${turnIndex + 1}: emit 8 coalesced agent stream updates`,
     );
   }
+  const agents = [await inspectAgent(input.client, agent, "light")];
+  if (input.workspaceIndex === 0) {
+    const coldMarkdownAgent = await createAgent(
+      input.client,
+      workspace,
+      repo.path,
+      "Markdown cold-only 1048576B open_typescript_fence",
+    );
+    await runPrompt(
+      input.client,
+      coldMarkdownAgent.id,
+      "emit 1048576 byte markdown benchmark open_typescript_fence in 4096 byte chunks",
+    );
+    agents.push(await inspectAgent(input.client, coldMarkdownAgent, "markdown-cold"));
+  }
   return {
     id: workspace.id,
     title,
@@ -502,7 +517,7 @@ async function seedLightWorkspace(input: {
     repo,
     terminalId: null,
     targetHistoryItems: 10,
-    agents: [await inspectAgent(input.client, agent, "light")],
+    agents,
   };
 }
 

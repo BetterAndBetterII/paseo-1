@@ -1,0 +1,2 @@
+{"item_id":"h176_8tabs_3cycles","expected":{"switches":24,"title_body_consistent":true,"oldest_prompt_reachable":true,"latest_prompt_visible":true}}
+{"item_id":"markdown_1m_open_typescript","expected":{"prompt_visible":true,"code_visible":true,"payload_semantics":"open_typescript_fence"}}

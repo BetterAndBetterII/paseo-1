@@ -1,0 +1,18 @@
+experiment: desktop_version_ab
+plan: plan.yaml
+runs:
+  - variant: optimized_p0
+    scale: full
+    source: perf/desktop-markdown-p0
+    change: timeline and Markdown P0 performance commits
+    final_run: 20260720_020120__optimized_p0__e229c4
+  - variant: latest_main
+    scale: full
+    source: origin/main
+    change: source revision only; fixture, ports, profile initialization, and workload stay fixed
+    final_run: 20260720_015914__latest_main__2a0ee8
+diagnostic_ablations:
+  - name: eager_inactive_markdown
+    main_run: 20260720_014836__latest_main__2a0ee8
+    optimized_run: 20260720_014450__optimized_p0__e229c4
+    interpretation: inactive Markdown was pre-opened; preserve as retention-strategy evidence only
