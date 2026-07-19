@@ -27,6 +27,7 @@
 | 100KiB TypeScript 20 次增长前缀高亮            |                   累计 264ms | 未闭合 fence 重复做全量工作  |
 | 50 个增长前缀的高亮缓存                        | 12MiB、188,515 token objects | entry-count LRU 没有内存上界 |
 | 1,000 个 MarkdownIt 实例                       |    170ms、约 221MiB retained | 每消息一个实例存在乘法浪费   |
+| 80 个真实 TS token tree 的 cache heap          |      14.60MB → 8.99MB (-38%) | 8MiB weighted LRU 有效限界   |
 
 这些数字用于选择消融变量，不作为产品验收数字。正式结论必须来自冻结的
 `desktop_markdown_rendering@v2` Electron/Chromium benchmark。v1 仅在流开始时采一次反馈延迟，
@@ -132,3 +133,15 @@ remainder；remainder 默认最多挂载 96 个 block（32 head + 64 tail），�
 `b01ca4df...ce739`，与无限挂载 baseline 完全一致。reducer 单测同时验证所有源 block 和 turn
 copy 拼接文本无丢失。v3 的旧 scorer 在每个 React message root 间插入人工分隔符，会把内部
 组件边界变化误报为正文差异，因此只保留作 calibration；正式晋级只使用冻结的 v4。
+
+## accepted 高亮缓存内存上限
+
+原缓存只限制 200 个 entry；不同代码块的 token tree 大小差异可达数量级，因此 entry 上限不是
+有效的 retained-memory 上限。候选保留 200-entry LRU，同时增加 8MiB 的估算 retained-byte
+预算，权重包含 cache key、token 文本、line 与 token object 开销。
+
+在全新 Node 进程中连续缓存 80 个不同的 120 行 TypeScript token tree，并在前后强制 GC：
+entry-only baseline heap delta 为 14,595,168 bytes；weighted candidate 为 8,990,008 bytes
+（-38.4%）。候选保留 48 项、按 LRU 淘汰 32 项，估算权重为 8,354,112 bytes，未超过
+8MiB 预算。该诊断验证的是长会话累计 retention，不替代 Electron 端到端 benchmark；16KiB
+代码高亮上限已经独立约束单个超大 entry。
