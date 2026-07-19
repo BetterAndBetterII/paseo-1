@@ -156,3 +156,27 @@ post-GC heap 从 156.9/168.5MB 降到 149.6/161.3MB（p95 -4.3%），parse durat
 （+0.4%），Long Task p95 仅从 518ms 降到 514ms（-0.8%），未达到 P0 的 20% 交互晋级
 门槛。实现已回滚；可在未来有 176 条独立 assistant message 的 history-mount 专项 benchmark
 后重新评估为内存 P1，不计入本轮产品收益。
+
+## P0 组合验收
+
+最终代码 run `20260719_235127__final_p0_combined__9c896c` 在同一隔离 Chromium/Electron
+overlay 中各跑 5 次三个 anchor。相对冻结 baseline：
+
+- 64KiB 未闭合 TypeScript：end-to-end p50/p95 1,056.7/1,071.2ms → 209.4/210.7ms
+  （p95 -80.3%）；feedback 504.7/514.5ms → 23.1/44.9ms（p95 -91.3%）；Long Task
+  852/862ms → 0/0；frame gap p95 540.1ms → 35.9ms（-93.4%）；post-GC heap p95
+  292.5MB → 157.3MB（-46.2%）；DOM 29,132 → 11，non-ignored AX 58,550 → 3,222。
+- 256KiB mixed：end-to-end p50/p95 7,031.4/7,530.1ms → 774.7/816.4ms
+  （p95 -89.2%）；feedback 6,061.3/6,552.3ms → 161.3/169.4ms（p95 -97.4%）；
+  Long Task p95 7,314ms → 533ms（-92.7%）；frame gap p95 6,421.5ms → 226.6ms
+  （-96.5%）；post-GC heap p95 2.341GB → 200.1MB（-91.5%）；DOM/AX 均下降约 98%。
+  React duration p95 36,836.7ms → 2,971.1ms（-91.9%），掉帧 p95 15 → 6（-60%）。
+- 1MiB plain control：end-to-end p50/p95 2,515.6/2,612.8ms → 2,489.0/2,597.4ms
+  （p95 -0.6%），frame gap p95 86.0ms → 87.6ms（+1.9%），post-GC heap p95 基本不变。
+  feedback p95 40.4ms → 42.7ms（+5.7%）；Long Task p50 278ms → 286ms（+2.9%），p95
+  317ms → 444ms，来自 5 个样本中的单个 444ms 离群值。该 workload 的产品执行路径未被
+  三项候选改变，且 end-to-end、React duration、frame gap 与 heap 均稳定；1MiB 单块布局仍是
+  未解决短板，不把它计作本轮收益。
+
+三个 workload 的完整 rendered-text hash 均与各自 baseline 一致；mixed 自动展开后的 canonical
+hash 也一致。最终组合没有重新引入大 code token tree 或无限 mixed block 挂载。
