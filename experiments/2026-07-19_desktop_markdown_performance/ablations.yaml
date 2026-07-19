@@ -24,13 +24,14 @@ runs:
     rollback: highlight every streaming prefix
     reason: open-fence end-to-end p95 improved 25 percent and Long Task p95 improved 33 percent, but final token-span mounting still regressed feedback p95 8 percent and frame-gap p95 10 percent
 
-  - variant: completed_only_byte_bounded_highlight_cache
+  - variant: byte_bounded_highlight_cache
     priority: P0
     scale: full
-    status: queued
-    change: cache completed highlights only and evict by retained bytes rather than entry count alone
+    status: accepted
+    change: evict token trees by estimated retained bytes in addition to entry count
     primary_scope: long-session post-GC heap and cache retention
     rollback: restore the 200-entry content-keyed cache
+    reason: an 80-entry deterministic cache workload retained 14.60MB on the entry-only baseline and 8.99MB with the 8MiB weighted budget, a 38.4 percent measured heap reduction; candidate retained 48 entries and evicted 32
 
   - variant: shared_markdownit_instance
     priority: P0

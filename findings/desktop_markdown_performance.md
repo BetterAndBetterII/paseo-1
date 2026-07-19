@@ -6,7 +6,8 @@ Scorer: `desktop_markdown_metrics_v4`
 
 ## Current decisions
 
-- `BENCH-MD-01`: v2 released. Representative payloads and final-render hashes are frozen.
+- `BENCH-MD-01`: v4 released. Representative payloads, feedback scoring, and canonical expanded
+  render hashes are frozen.
 - `MD-TAIL-01` first candidate: rejected. It cut one MiB Long Task p95 by 52%, but did not meet
   the end-to-end/feedback/frame-gap promotion gate.
 - `MD-CODE-01` incomplete-fence candidate: rejected as a standalone change. It cut open-fence
@@ -27,6 +28,9 @@ Scorer: `desktop_markdown_metrics_v4`
   default and expands on demand. On 256KiB mixed Markdown, feedback p95 improved 94.6%, Long Task
   89.5%, DOM 98.1%, AX 98.0%, and post-GC heap 92.6%. Expanded canonical text hash and turn-copy
   source reconstruction match the unbounded baseline exactly.
+- `MD-CACHE-01` byte-bounded highlight cache: accepted. An 80-entry TypeScript token-tree workload
+  retained 14.60MB after GC with the entry-only cache versus 8.99MB with an 8MiB weighted budget
+  (-38.4%); the candidate retained 48 entries and evicted 32 while preserving LRU semantics.
 
 Only v4 runs may promote expandable-renderer candidates. v1 missed later main-thread stalls; v3
 hashed artificial React root boundaries. Both remain calibration evidence only.
