@@ -620,6 +620,7 @@ JSON envelope with the Git commit, dirty-worktree flag, and Node runtime identit
 npm run benchmark                                      # Run all registered tasks
 npm run benchmark -- --list                            # List registered tasks
 npm run benchmark -- agent-stream-reducer              # Run one task
+npm run benchmark -- desktop-interaction               # Run isolated heavy-tab UI benchmark
 npm run benchmark -- --output /tmp/paseo-benchmark.json
 ```
 
@@ -627,6 +628,15 @@ Each task writes a `BenchmarkTaskResult` with stable task/case IDs, scalar dimen
 metrics. Add a benchmark by implementing that result contract and registering its command in
 `scripts/benchmarks/tasks.ts`. Keep workloads deterministic and make each task verify correctness
 before reporting timing data.
+
+The `desktop-interaction` task starts its own temporary daemon and Metro instance on random ports,
+uses the development mock provider to seed 50/100/176-item timelines, and runs the Electron web
+overlay in Chromium. It blocks all browser traffic to the production daemon port (`6767`). The task
+reports heavy-tab switch latency, title/body consistency, React commits, long tasks, frame gaps,
+DOM/AX size, and JavaScript heap. Long cases load and verify the oldest stored prompt before
+measurement. Heap results include both the pre-GC allocation level and post-GC live heap. Use a
+real-Electron CDP run when validating OS renderer RSS, physical footprint, swap/page-in, and
+GPU-process behavior; those are intentionally not inferred from the Chromium-overlay task.
 
 ## Typecheck
 

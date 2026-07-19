@@ -20,4 +20,22 @@ export const benchmarkTasks: BenchmarkTaskDefinition[] = [
       "packages/app/scripts/benchmark-agent-stream-reducer.ts",
     ],
   },
+  {
+    id: "desktop-interaction",
+    description:
+      "Measure heavy agent-tab switching, title/body consistency, render work, DOM, AX, and heap",
+    command: npxCommand,
+    args: [
+      "--no-install",
+      "cross-env",
+      "E2E_DESKTOP_RUNTIME=1",
+      "PASEO_DESKTOP_BENCHMARK=1",
+      "playwright",
+      "test",
+      "--config",
+      "packages/app/playwright.config.ts",
+      "--project=Desktop Chrome",
+      "desktop-interaction.benchmark.spec.ts",
+    ],
+  },
 ];
