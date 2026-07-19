@@ -4389,6 +4389,41 @@ describe("createAgentStreamReducerQueue", () => {
     expect(scheduler.size).toBe(0);
   });
 
+  it("profiles the actual assistant chunks observed in a scheduled flush when enabled", () => {
+    const scheduler = createManualScheduler();
+    globalThis.__PASEO_AGENT_STREAM_FLUSH_PROFILE__ = [];
+    try {
+      const queue = createAgentStreamReducerQueue({
+        getSnapshot: () => ({
+          currentTail: [],
+          currentHead: [],
+          currentCursor: undefined,
+          currentAgent: null,
+        }),
+        commit: () => {},
+        handleSideEffects: () => {},
+        scheduleFlush: scheduler.schedule,
+        cancelFlush: scheduler.cancel,
+      });
+
+      queue.enqueue("agent-1", makeStreamReducerEvent(makeTimelineEvent("Hello"), 1));
+      queue.enqueue("agent-1", makeStreamReducerEvent(makeTimelineEvent(" world"), 2));
+      scheduler.flushOne();
+
+      expect(globalThis.__PASEO_AGENT_STREAM_FLUSH_PROFILE__).toEqual([
+        expect.objectContaining({
+          agentId: "agent-1",
+          eventCount: 2,
+          assistantChunkCount: 2,
+          assistantBytes: 11,
+          maxContiguousAssistantRun: 2,
+        }),
+      ]);
+    } finally {
+      delete globalThis.__PASEO_AGENT_STREAM_FLUSH_PROFILE__;
+    }
+  });
+
   it("flushes queued events synchronously for one agent before canonical history is applied", () => {
     const scheduler = createManualScheduler();
     const commits: string[] = [];

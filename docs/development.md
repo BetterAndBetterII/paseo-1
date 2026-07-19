@@ -621,6 +621,7 @@ npm run benchmark                                      # Run all registered task
 npm run benchmark -- --list                            # List registered tasks
 npm run benchmark -- agent-stream-reducer              # Run one task
 npm run benchmark -- desktop-interaction               # Run isolated heavy-tab UI benchmark
+npm run benchmark -- desktop-streaming                 # Run live reducer-to-Markdown benchmark
 npm run benchmark -- --output /tmp/paseo-benchmark.json
 ```
 
@@ -637,6 +638,12 @@ DOM/AX size, and JavaScript heap. Long cases load and verify the oldest stored p
 measurement. Heap results include both the pre-GC allocation level and post-GC live heap. Use a
 real-Electron CDP run when validating OS renderer RSS, physical footprint, swap/page-in, and
 GPU-process behavior; those are intentionally not inferred from the Chromium-overlay task.
+
+The `desktop-streaming` task drives exact 64KiB, 256KiB, and 1MiB assistant streams through the
+isolated daemon and visible Desktop-web UI. It records the real chunks-per-scheduled-flush
+distribution alongside reducer time, React commits, Markdown completion, long tasks, frame gaps,
+heap allocation, and a main-thread click-feedback probe. This complements the synthetic
+`agent-stream-reducer` benchmark, whose fixed chunks-per-flush value is a workload assumption.
 
 ## Typecheck
 

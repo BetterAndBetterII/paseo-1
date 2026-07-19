@@ -164,6 +164,9 @@ interface LargeAgentStreamPayloadRequest {
 interface AgentStreamStressRequest {
   count: number;
   coalesced: boolean;
+  payloadBytes?: number;
+  chunkBytes?: number;
+  intervalMs?: number;
 }
 
 type SteeringReplayShape = "claude" | "codex";
@@ -337,6 +340,29 @@ function parseLargeAgentStreamPayloadPrompt(
 
 function parseAgentStreamStressPrompt(prompt: AgentPromptInput): AgentStreamStressRequest | null {
   const text = promptToText(prompt);
+  const byteStreamMatch =
+    /emit\s+(\d+)\s+byte\s+coalesced assistant stream(?:\s+in\s+(\d+)\s+byte chunks)?(?:\s+every\s+(\d+)\s+ms)?/i.exec(
+      text,
+    );
+  if (byteStreamMatch) {
+    const payloadBytes = Math.min(Number(byteStreamMatch[1]), 1024 * 1024);
+    const chunkBytes = Math.min(Number(byteStreamMatch[2] ?? 512), 64 * 1024);
+    const intervalMs = byteStreamMatch[3] ? Math.min(Number(byteStreamMatch[3]), 1_000) : undefined;
+    if (
+      Number.isInteger(payloadBytes) &&
+      payloadBytes > 0 &&
+      Number.isInteger(chunkBytes) &&
+      chunkBytes > 0
+    ) {
+      return {
+        count: Math.ceil(payloadBytes / chunkBytes),
+        coalesced: true,
+        payloadBytes,
+        chunkBytes,
+        ...(intervalMs && Number.isInteger(intervalMs) && intervalMs > 0 ? { intervalMs } : {}),
+      };
+    }
+  }
   const match = /emit\s+(\d+)\s+(coalesced\s+)?agent stream updates/i.exec(text);
   if (!match) {
     return null;
@@ -1287,22 +1313,64 @@ export class MockLoadTestAgentSession implements AgentSession {
     this.clearTurnTimer(turn);
     this.emitTurnStarted(turn);
 
-    for (let index = 0; index < stress.count; index += 1) {
-      this.emitTimeline(
-        turn.turnId,
-        stress.coalesced
-          ? {
-              type: "assistant_message",
-              text: `stress-update-${index}`,
-              messageId: turn.assistantMessageId,
-            }
-          : {
-              type: "todo",
-              items: [{ text: `stress-update-${index}`, completed: index % 2 === 0 }],
-            },
-      );
+    if (stress.intervalMs) {
+      this.emitStressUpdate(turn, stress, 0);
+      return;
     }
+    for (let index = 0; index < stress.count; index += 1) {
+      this.emitStressTimelineUpdate(turn, stress, index);
+    }
+    this.finishStressTurn(turn, stress);
+  }
 
+  private emitStressUpdate(
+    turn: ActiveTurn,
+    stress: AgentStreamStressRequest,
+    index: number,
+  ): void {
+    if (this.activeTurn !== turn) {
+      return;
+    }
+    this.emitStressTimelineUpdate(turn, stress, index);
+    const nextIndex = index + 1;
+    if (nextIndex >= stress.count) {
+      this.finishStressTurn(turn, stress);
+      return;
+    }
+    turn.timer = setTimeout(() => {
+      this.emitStressUpdate(turn, stress, nextIndex);
+    }, stress.intervalMs);
+    turn.timer.unref?.();
+  }
+
+  private emitStressTimelineUpdate(
+    turn: ActiveTurn,
+    stress: AgentStreamStressRequest,
+    index: number,
+  ): void {
+    const emittedBytes = index * (stress.chunkBytes ?? 0);
+    const assistantText = stress.payloadBytes
+      ? "x".repeat(
+          Math.min(stress.chunkBytes ?? stress.payloadBytes, stress.payloadBytes - emittedBytes),
+        )
+      : `stress-update-${index}`;
+    this.emitTimeline(
+      turn.turnId,
+      stress.coalesced
+        ? {
+            type: "assistant_message",
+            text: assistantText,
+            messageId: turn.assistantMessageId,
+          }
+        : {
+            type: "todo",
+            items: [{ text: `stress-update-${index}`, completed: index % 2 === 0 }],
+          },
+    );
+  }
+
+  private finishStressTurn(turn: ActiveTurn, stress: AgentStreamStressRequest): void {
+    this.clearTurnTimer(turn);
     this.activeTurn = null;
     const usage = {
       inputTokens: 1,

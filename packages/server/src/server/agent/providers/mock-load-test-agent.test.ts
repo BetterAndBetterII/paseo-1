@@ -312,6 +312,31 @@ describe("MockLoadTestAgentClient", () => {
     expect(events).toHaveLength(eventCountAfterInterrupt);
   });
 
+  test("emits an exact byte-sized coalesced assistant stream for UI benchmarks", async () => {
+    vi.useFakeTimers();
+    const client = new MockLoadTestAgentClient();
+    const session = await client.createSession({
+      provider: "mock",
+      cwd: process.cwd(),
+      model: "ten-second-stream",
+    });
+    const events: AgentStreamEvent[] = [];
+    const unsubscribe = session.subscribe((event) => events.push(event));
+
+    const resultPromise = session.run(
+      "emit 65536 byte coalesced assistant stream in 512 byte chunks every 1 ms",
+    );
+    await vi.advanceTimersByTimeAsync(128);
+    await resultPromise;
+    unsubscribe();
+
+    const assistantChunks = events.flatMap((event) =>
+      event.type === "timeline" && event.item.type === "assistant_message" ? [event.item.text] : [],
+    );
+    expect(assistantChunks).toHaveLength(128);
+    expect(assistantChunks.join("")).toBe("x".repeat(65_536));
+  });
+
   test("emits a terminal failure without an assistant provider message", async () => {
     vi.useFakeTimers();
     const client = new MockLoadTestAgentClient();

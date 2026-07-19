@@ -15,6 +15,20 @@ import {
 
 const AGENT_STREAM_REDUCER_FLUSH_DELAY_MS = 16 * 3;
 
+export interface AgentStreamReducerFlushProfileSample {
+  agentId: string;
+  eventCount: number;
+  assistantChunkCount: number;
+  assistantBytes: number;
+  maxContiguousAssistantRun: number;
+  reducerDurationMs: number;
+  completedAt: number;
+}
+
+declare global {
+  var __PASEO_AGENT_STREAM_FLUSH_PROFILE__: AgentStreamReducerFlushProfileSample[] | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Shared cursor type
 // ---------------------------------------------------------------------------
@@ -1892,10 +1906,44 @@ export function createAgentStreamReducerQueue(
       cancelScheduledFlush();
     }
 
+    const flushProfile = globalThis.__PASEO_AGENT_STREAM_FLUSH_PROFILE__;
+    const reducerStartedAt = flushProfile ? performance.now() : 0;
     const result = processAgentStreamEvents({
       events,
       ...input.getSnapshot(agentId),
     });
+    if (flushProfile) {
+      let assistantChunkCount = 0;
+      let assistantBytes = 0;
+      let currentAssistantRun = 0;
+      let maxContiguousAssistantRun = 0;
+      let previousAssistantEvent: AssistantTimelineReducerEvent | undefined;
+      for (const event of events) {
+        if (!isAssistantTimelineReducerEvent(event)) {
+          previousAssistantEvent = undefined;
+          currentAssistantRun = 0;
+          continue;
+        }
+        assistantChunkCount += 1;
+        assistantBytes += event.event.item.text.length;
+        currentAssistantRun =
+          previousAssistantEvent && canCoalesceAssistantEvents(previousAssistantEvent, event)
+            ? currentAssistantRun + 1
+            : 1;
+        maxContiguousAssistantRun = Math.max(maxContiguousAssistantRun, currentAssistantRun);
+        previousAssistantEvent = event;
+      }
+      const completedAt = performance.now();
+      flushProfile.push({
+        agentId,
+        eventCount: events.length,
+        assistantChunkCount,
+        assistantBytes,
+        maxContiguousAssistantRun,
+        reducerDurationMs: completedAt - reducerStartedAt,
+        completedAt,
+      });
+    }
 
     input.commit(agentId, result, events);
     if (result.sideEffects.length > 0) {
