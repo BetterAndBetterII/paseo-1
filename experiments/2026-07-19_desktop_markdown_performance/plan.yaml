@@ -12,7 +12,7 @@ entrypoint:
   command: npm run benchmark -- desktop-markdown --output {run_dir}/benchmark.json
 benchmark:
   id: desktop_markdown_rendering
-  release: v3
+  release: v4
   status: released
   freeze_before_candidate_runs: true
   environments:
@@ -34,9 +34,9 @@ benchmark:
   repetitions: 5
 eval:
   benchmark: desktop_markdown_rendering
-  benchmark_version: v3
+  benchmark_version: v4
   split: anchor
-  scorer_version: desktop_markdown_metrics_v3
+  scorer_version: desktop_markdown_metrics_v4
 params:
   provider_chunk_bytes: 512
   provider_chunk_interval_ms: 1

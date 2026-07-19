@@ -372,7 +372,7 @@ async function finishStreamProbe(
 
       const renderedText = Array.from(assistantMessages)
         .map((element) => element.textContent ?? "")
-        .join("\n---assistant-message---\n");
+        .join("");
       const renderedBytes = new TextEncoder().encode(renderedText);
       const renderedDigest = await crypto.subtle.digest("SHA-256", renderedBytes);
       const renderedTextHash = Array.from(new Uint8Array(renderedDigest), (byte) =>
@@ -469,7 +469,7 @@ async function expandLongAssistantMessageAndReadHash(
     );
     const renderedText = Array.from(assistantMessages)
       .map((element) => element.textContent ?? "")
-      .join("\n---assistant-message---\n");
+      .join("");
     const renderedBytes = new TextEncoder().encode(renderedText);
     const renderedDigest = await crypto.subtle.digest("SHA-256", renderedBytes);
     return Array.from(new Uint8Array(renderedDigest), (byte) =>
@@ -630,8 +630,8 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
         feedbackSampleIntervalMs: FEEDBACK_SAMPLE_INTERVAL_MS,
         viewportWidth: VIEWPORT.width,
         viewportHeight: VIEWPORT.height,
-        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v3" : null,
-        scorerVersion: isMarkdownBenchmark ? "desktop_markdown_metrics_v3" : null,
+        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v4" : null,
+        scorerVersion: isMarkdownBenchmark ? "desktop_markdown_metrics_v4" : null,
       },
       cases,
     } satisfies BenchmarkTaskResult;
