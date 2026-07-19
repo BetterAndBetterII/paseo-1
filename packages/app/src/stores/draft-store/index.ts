@@ -14,11 +14,13 @@ import { useSessionStore, type SessionState } from "@/stores/session-store";
 import { useWorkspaceAttachmentsStore } from "@/attachments/workspace-attachments-store";
 import {
   applyClearDraftRecord,
+  collectStreamUserImageIds,
   collectReferencedAttachmentIdsFromState,
   DRAFT_STORE_VERSION,
   isAttachmentMetadata,
   isCanonicalDraftInput,
   isLegacyDraftImage,
+  haveDraftImageReferencesChanged,
   normalizeComposerAttachment,
   pruneFinalizedDraftRecords,
   toDraftInputIfReady,
@@ -200,20 +202,6 @@ function collectQueuedMessageAttachmentIds(
   }
 }
 
-function collectStreamUserImageIds(
-  streams: SessionState["agentStreamTail"],
-  referencedIds: Set<string>,
-): void {
-  for (const stream of streams.values()) {
-    for (const item of stream) {
-      if (item.kind !== "user_message") continue;
-      for (const image of item.images ?? []) {
-        referencedIds.add(image.id);
-      }
-    }
-  }
-}
-
 function scheduleAttachmentGc(): void {
   if (gcScheduled) {
     return;
@@ -300,8 +288,13 @@ export const useDraftStore = create<DraftStore>()(
       },
 
       saveDraftInput: ({ draftKey, draft }) => {
+        let imageReferencesChanged = false;
         set((state) => {
           const existing = state.drafts[draftKey];
+          imageReferencesChanged = haveDraftImageReferencesChanged(
+            existing?.input.attachments ?? [],
+            draft.attachments,
+          );
           return {
             drafts: {
               ...state.drafts,
@@ -313,7 +306,9 @@ export const useDraftStore = create<DraftStore>()(
             },
           };
         });
-        scheduleAttachmentGc();
+        if (imageReferencesChanged) {
+          scheduleAttachmentGc();
+        }
       },
 
       markDraftLifecycle: ({ draftKey, lifecycle }) => {
@@ -396,7 +391,12 @@ export const useDraftStore = create<DraftStore>()(
       },
 
       saveCreateModalDraft: (draft) => {
+        let imageReferencesChanged = false;
         set((state) => {
+          imageReferencesChanged = haveDraftImageReferencesChanged(
+            state.createModalDraft?.input.attachments ?? [],
+            draft?.attachments ?? [],
+          );
           if (!draft) {
             return { createModalDraft: null };
           }
@@ -408,7 +408,9 @@ export const useDraftStore = create<DraftStore>()(
             }),
           };
         });
-        scheduleAttachmentGc();
+        if (imageReferencesChanged) {
+          scheduleAttachmentGc();
+        }
       },
 
       collectActiveAttachmentIds: () => {

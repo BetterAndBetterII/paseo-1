@@ -59,7 +59,11 @@ import {
   deriveWorkspacePaneState,
   getWorkspacePaneDescriptors,
 } from "@/screens/workspace/workspace-pane-state";
-import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
+import {
+  deriveMountableWorkspaceTabIds,
+  shouldRetainInactiveAgentTimelines,
+  useMountedTabSet,
+} from "@/screens/workspace/use-mounted-tab-set";
 import { useModifiedPanelTabIds } from "@/panels/panel-instance-attributes";
 import {
   WorkspacePaneContent,
@@ -1137,9 +1141,19 @@ function SplitPaneView({
   });
   const tabDescriptorMap = useStableTabDescriptorMap(paneTabs);
   const activeTabDescriptor = paneState.activeTab?.descriptor ?? null;
+  const mountablePaneTabIds = useMemo(
+    () =>
+      deriveMountableWorkspaceTabIds({
+        activeTabId: activeTabDescriptor?.tabId ?? null,
+        isWorkspaceFocused,
+        retainInactiveTimelineTabs: isNative || shouldRetainInactiveAgentTimelines(),
+        tabs: paneTabs,
+      }),
+    [activeTabDescriptor?.tabId, isWorkspaceFocused, paneTabs],
+  );
   const { mountedTabIds } = useMountedTabSet({
     activeTabId: activeTabDescriptor?.tabId ?? null,
-    allTabIds: paneTabIds,
+    allTabIds: mountablePaneTabIds,
     retainedTabIds: modifiedPaneTabIds,
     cap: 3,
   });
