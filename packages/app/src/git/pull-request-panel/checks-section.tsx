@@ -1,8 +1,8 @@
 import { useCallback, useMemo } from "react";
-import { Pressable, ScrollView, Text, View, type GestureResponderEvent } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, ChevronRight, MessageSquarePlus } from "lucide-react-native";
-import { Button } from "@/components/ui/button";
+import { Button, type ButtonPressEvent } from "@/components/ui/button";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { ICON_SIZE } from "@/styles/theme";
 import type { CheckStatus } from "./check-status";
@@ -186,7 +186,7 @@ function CheckRow({
     void openExternalUrl(check.url);
   }, [check.url]);
   const handleAddLogsToChat = useCallback(
-    (event: GestureResponderEvent) => {
+    (event: ButtonPressEvent) => {
       event.stopPropagation();
       onAddLogsToChat(check);
     },
