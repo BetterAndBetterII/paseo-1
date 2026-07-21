@@ -4,6 +4,7 @@ import {
   type UserComposerAttachment,
 } from "@/attachments/types";
 import { PluginResourceComposerAttachmentSchema } from "@/plugins/attachments";
+import type { StreamItem } from "@/types/stream";
 import { z } from "zod";
 
 export const DRAFT_STORE_VERSION = 5;
@@ -217,6 +218,28 @@ export function collectReferencedAttachmentIdsFromState(state: DraftStoreState):
   }
 
   return referencedIds;
+}
+
+/**
+ * Scans persisted session streams for attachment ids referenced by user messages.
+ * The return value is only used by performance benchmarks; callers performing GC
+ * can ignore it without changing collection semantics.
+ */
+export function collectStreamUserImageIds(
+  streams: ReadonlyMap<string, StreamItem[]>,
+  referencedIds: Set<string>,
+): number {
+  let scannedItems = 0;
+  for (const stream of streams.values()) {
+    for (const item of stream) {
+      scannedItems += 1;
+      if (item.kind !== "user_message") continue;
+      for (const image of item.images ?? []) {
+        referencedIds.add(image.id);
+      }
+    }
+  }
+  return scannedItems;
 }
 
 export function pruneFinalizedDraftRecords(input: {

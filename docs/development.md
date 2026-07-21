@@ -644,6 +644,9 @@ JSON envelope with the Git commit, dirty-worktree flag, and Node runtime identit
 npm run benchmark                                      # Run all registered tasks
 npm run benchmark -- --list                            # List registered tasks
 npm run benchmark -- agent-stream-reducer              # Run one task
+npm run benchmark -- desktop-interaction               # Run the 1/4/8-tab switch matrix
+npm run benchmark -- desktop-streaming                  # Run 64KiB/256KiB/1MiB live streams
+npm run benchmark -- desktop-markdown                   # Run deterministic Markdown workloads
 npm run benchmark -- --output /tmp/paseo-benchmark.json
 ```
 
@@ -651,6 +654,26 @@ Each task writes a `BenchmarkTaskResult` with stable task/case IDs, scalar dimen
 metrics. Add a benchmark by implementing that result contract and registering its command in
 `scripts/benchmarks/tasks.ts`. Keep workloads deterministic and make each task verify correctness
 before reporting timing data.
+
+The registry currently covers:
+
+- `agent-stream-reducer`: synthetic reducer cost for 64KiB, 256KiB, and 1MiB streams.
+- `draft-attachment-gc`: the 0/100/500-session history scan triggered by repeated draft changes.
+- `desktop-interaction`: 1/4/8 retained Agent tabs at 50/100/176 history items, including switch
+  p50/p95, title/body consistency, React commits, frames, DOM/AX nodes, and heap. Set
+  `PASEO_BENCHMARK_RETAIN_INACTIVE_AGENT_TIMELINES=0` for the explicit unmount ablation; the
+  production default remains retained.
+- `desktop-streaming`: exact 64KiB, 256KiB, and 1MiB visible UI streams, including the observed
+  chunks-per-flush distribution, reducer/React time, long tasks, frames, heap, and feedback delay.
+- `desktop-markdown`: plain text, prose, open/closed code fences, mixed Markdown, and dense
+  link/table workloads with parse, highlight, DOM/AX, feedback, and rendered-hash checks.
+- `desktop-css-interactions`: 1/8/20-tab hover response, React commits, frames, DOM, and AX nodes.
+- `desktop-css-interaction-audit`: a TypeScript-AST inventory of JS hover/press callbacks and state,
+  grouped by Desktop UI area.
+
+Every browser benchmark starts an isolated temporary daemon and Metro instance on random ports.
+The specs explicitly abort HTTP and WebSocket traffic to port 6767 so they cannot attach to the
+production Paseo daemon.
 
 ## Typecheck
 
