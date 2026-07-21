@@ -8,7 +8,11 @@ import type {
   BenchmarkMetricResult,
   BenchmarkTaskResult,
 } from "../scripts/benchmark-support";
-import { summarizeSamples } from "../scripts/benchmark-support";
+import {
+  BENCHMARK_FRAME_INTERVAL_MS,
+  summarizeFrameGaps,
+  summarizeSamples,
+} from "../scripts/benchmark-support";
 
 const TAB_COUNTS = [1, 8, 20] as const;
 const HOVER_CYCLES = 100;
@@ -209,6 +213,7 @@ function buildCaseResult(
   tabCount: number,
   metrics: Awaited<ReturnType<typeof measureHoverCase>>,
 ): BenchmarkCaseResult {
+  const frameSummary = summarizeFrameGaps(metrics.frameGapsMs);
   return {
     id: `tabs-${tabCount}-hover`,
     dimensions: { visibleTabs: tabCount, hoverCycles: HOVER_CYCLES, load: "idle" },
@@ -222,11 +227,9 @@ function buildCaseResult(
         "ms",
         metrics.longTaskDurationsMs.reduce((sum, duration) => sum + duration, 0),
       ),
-      droppedFrames: scalarMetric(
-        "count",
-        metrics.frameGapsMs.filter((duration) => duration > 20).length,
-      ),
-      maxFrameGap: scalarMetric("ms", Math.max(0, ...metrics.frameGapsMs)),
+      delayedFrameIntervals: scalarMetric("count", frameSummary.delayedFrameIntervals),
+      estimatedDroppedFrames: scalarMetric("count", frameSummary.estimatedDroppedFrames),
+      maxFrameGap: scalarMetric("ms", frameSummary.maxFrameGapMs),
       domNodes: scalarMetric("count", metrics.domNodes),
       axNodes: scalarMetric("count", metrics.axNodes),
     },
@@ -266,6 +269,7 @@ test("benchmarks Desktop CSS tab hover feedback", async ({ page }) => {
       viewportWidth: VIEWPORT.width,
       viewportHeight: VIEWPORT.height,
       load: "idle",
+      assumedFrameIntervalMs: BENCHMARK_FRAME_INTERVAL_MS,
     },
     cases,
   } satisfies BenchmarkTaskResult;

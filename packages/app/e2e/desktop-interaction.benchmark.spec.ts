@@ -13,7 +13,11 @@ import type {
   BenchmarkMetricResult,
   BenchmarkTaskResult,
 } from "../scripts/benchmark-support";
-import { summarizeSamples } from "../scripts/benchmark-support";
+import {
+  BENCHMARK_FRAME_INTERVAL_MS,
+  summarizeFrameGaps,
+  summarizeSamples,
+} from "../scripts/benchmark-support";
 
 const HISTORY_TURN_COUNTS = [25, 50, 88] as const;
 const HEAVY_TAB_COUNTS = [1, 4, 8] as const;
@@ -46,8 +50,7 @@ interface SwitchSample {
   reactDurationMs: number;
   longTaskCount: number;
   longTaskDurationMs: number;
-  droppedFrameCount: number;
-  maxFrameGapMs: number;
+  frameGapsMs: number[];
   heapDeltaBytes: number;
 }
 
@@ -359,8 +362,7 @@ async function armSwitchMeasurement(
             reactDurationMs: samples.reduce((sum, sample) => sum + sample.actualDuration, 0),
             longTaskCount: longTasks.length,
             longTaskDurationMs,
-            droppedFrameCount: frameGaps.filter((gap) => gap > 20).length,
-            maxFrameGapMs: Math.max(0, ...frameGaps),
+            frameGapsMs: frameGaps,
           });
         }
 
@@ -515,6 +517,7 @@ function buildCaseResult(input: {
   webVirtualizationPolicy: WebVirtualizationPolicy;
 }): BenchmarkCaseResult {
   const { historyItems, heavyTabs, samples, footprint, webVirtualizationPolicy } = input;
+  const frameSummaries = samples.map((sample) => summarizeFrameGaps(sample.frameGapsMs));
   return {
     id: `tabs-${heavyTabs}-history-${historyItems}`,
     dimensions: {
@@ -526,6 +529,7 @@ function buildCaseResult(input: {
       webMountedRecentItems: webVirtualizationPolicy.mountedRecentItems,
       retainInactiveAgentTimelines: webVirtualizationPolicy.retainInactiveAgentTimelines,
       fullStoredHistoryLoaded: true,
+      assumedFrameIntervalMs: BENCHMARK_FRAME_INTERVAL_MS,
     },
     metrics: {
       selected: durationMetric(samples.map((sample) => sample.selectedMs)),
@@ -536,8 +540,13 @@ function buildCaseResult(input: {
       reactDuration: durationMetric(samples.map((sample) => sample.reactDurationMs)),
       longTaskCount: countMetric(samples.map((sample) => sample.longTaskCount)),
       longTaskDuration: durationMetric(samples.map((sample) => sample.longTaskDurationMs)),
-      droppedFrames: countMetric(samples.map((sample) => sample.droppedFrameCount)),
-      maxFrameGap: durationMetric(samples.map((sample) => sample.maxFrameGapMs)),
+      delayedFrameIntervals: countMetric(
+        frameSummaries.map((summary) => summary.delayedFrameIntervals),
+      ),
+      estimatedDroppedFrames: countMetric(
+        frameSummaries.map((summary) => summary.estimatedDroppedFrames),
+      ),
+      maxFrameGap: durationMetric(frameSummaries.map((summary) => summary.maxFrameGapMs)),
       heapDelta: bytesMetric(samples.map((sample) => sample.heapDeltaBytes)),
       footprint: {
         unit: "count",

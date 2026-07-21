@@ -667,10 +667,18 @@ The registry currently covers:
 - `desktop-streaming`: exact 64KiB, 256KiB, and 1MiB visible UI streams, including the observed
   chunks-per-flush distribution, reducer/React time, long tasks, frames, heap, and feedback delay.
 - `desktop-markdown`: plain text, prose, open/closed code fences, mixed Markdown, and dense
-  link/table workloads with parse, highlight, DOM/AX, feedback, and rendered-hash checks.
+  link/table workloads with parse, highlight, DOM/AX, feedback, and an independent visible-text
+  correctness oracle. Each streaming/Markdown measurement uses a fresh browser context, so
+  archived agents and renderer caches from an earlier sample cannot contaminate later samples.
 - `desktop-css-interactions`: 1/8/20-tab hover response, React commits, frames, DOM, and AX nodes.
 - `desktop-css-interaction-audit`: a TypeScript-AST inventory of JS hover/press callbacks and state,
   grouped by Desktop UI area.
+
+Browser benchmarks report `delayedFrameIntervals` (observed animation-frame gaps over 1.2 times
+the declared frame interval) separately from `estimatedDroppedFrames` (the number of expected
+frame opportunities skipped across those gaps). For example, a one-second pause at the declared
+60Hz interval is approximately 59 dropped frames, not one dropped-frame event. Results also keep
+`maxFrameGap` and publish `assumedFrameIntervalMs` so the estimate is auditable.
 
 Every browser benchmark starts an isolated temporary daemon and Metro instance on random ports.
 The specs explicitly abort HTTP and WebSocket traffic to port 6767 so they cannot attach to the

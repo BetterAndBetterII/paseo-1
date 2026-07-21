@@ -1,12 +1,23 @@
 import { writeFile } from "node:fs/promises";
-import type { BrowserContext, CDPSession, Page } from "@playwright/test";
+import type { Browser, BrowserContext, CDPSession, Page } from "@playwright/test";
 import type {
   BenchmarkCaseResult,
   BenchmarkMetricResult,
   BenchmarkTaskResult,
 } from "../scripts/benchmark-support";
-import { summarizeSamples } from "../scripts/benchmark-support";
+import {
+  BENCHMARK_FRAME_INTERVAL_MS,
+  summarizeFrameGaps,
+  summarizeSamples,
+} from "../scripts/benchmark-support";
 import { test } from "./fixtures";
+import {
+  buildMarkdownTextOracle,
+  MARKDOWN_ORACLE_RELEASE,
+  MARKDOWN_WORKLOADS,
+  type MarkdownTextOracle,
+  type MarkdownWorkload,
+} from "./desktop-markdown-oracle";
 import { buildCreateAgentPreferences, buildSeededHost } from "./helpers/daemon-registry";
 import { getE2EDaemonPort } from "./helpers/daemon-port";
 import { buildAgentRoute } from "./helpers/mock-agent";
@@ -20,17 +31,6 @@ const FEEDBACK_TARGET_DELAY_MS = 25;
 const FEEDBACK_SAMPLE_INTERVAL_MS = 100;
 const VIEWPORT = { width: 1440, height: 900 };
 const isMarkdownBenchmark = process.env.PASEO_MARKDOWN_BENCHMARK === "1";
-
-const MARKDOWN_WORKLOADS = [
-  "plain_unbroken",
-  "prose_blocks",
-  "open_typescript_fence",
-  "closed_typescript_fences",
-  "mixed_markdown",
-  "link_table_dense",
-] as const;
-
-type MarkdownWorkload = (typeof MARKDOWN_WORKLOADS)[number];
 
 interface StreamBenchmarkCase {
   workload: MarkdownWorkload;
@@ -147,8 +147,7 @@ interface StreamRunSample {
   reactDurationMs: number;
   longTaskCount: number;
   longTaskDurationMs: number;
-  droppedFrameCount: number;
-  maxFrameGapMs: number;
+  frameGapsMs: number[];
   feedbackDelayMs: number;
   feedbackDelayMaxMs: number;
   feedbackSamples: number;
@@ -327,11 +326,65 @@ async function waitForAssistantBytes(page: Page, expectedBytes: number): Promise
 
 async function finishStreamProbe(
   page: Page,
-  input: { expectedBytes: number; heapBefore: number; verifyPlainText: boolean },
+  input: {
+    expectedBytes: number;
+    heapBefore: number;
+    verifyPlainText: boolean;
+    markdownOracle: MarkdownTextOracle | null;
+  },
 ): Promise<StreamRunSample> {
   const heapAfter = await readHeap(page);
   return page.evaluate(
-    async ({ expectedBytes, heapBefore, heapAfterValue, verifyPlainText }) => {
+    async ({ expectedBytes, heapBefore, heapAfterValue, verifyPlainText, markdownOracle }) => {
+      async function assertMarkdownRendering(
+        assistantMessages: NodeListOf<HTMLElement>,
+        renderedText: string,
+        oracle: MarkdownTextOracle | null,
+      ): Promise<void> {
+        if (!oracle) return;
+        const normalizedRenderedText = renderedText.replace(/[•◦▪\s]+/gu, "");
+        const normalizedDigest = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(normalizedRenderedText),
+        );
+        const normalizedHash = Array.from(new Uint8Array(normalizedDigest), (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        ).join("");
+        const renderedAnchorCount = Array.from(assistantMessages).reduce(
+          (sum, element) => sum + element.querySelectorAll("a").length,
+          0,
+        );
+        if (
+          normalizedRenderedText === oracle.expectedNormalizedText &&
+          normalizedHash === oracle.expectedNormalizedTextHash &&
+          renderedAnchorCount === oracle.expectedAnchorCount
+        ) {
+          return;
+        }
+
+        let mismatchIndex = 0;
+        while (
+          mismatchIndex < normalizedRenderedText.length &&
+          mismatchIndex < oracle.expectedNormalizedText.length &&
+          normalizedRenderedText[mismatchIndex] === oracle.expectedNormalizedText[mismatchIndex]
+        ) {
+          mismatchIndex += 1;
+        }
+        const previewStart = Math.max(0, mismatchIndex - 40);
+        const previewEnd = mismatchIndex + 80;
+        throw new Error(
+          [
+            `Markdown oracle ${oracle.release} rejected rendered output`,
+            `text chars ${normalizedRenderedText.length}/${oracle.expectedNormalizedTextChars}`,
+            `text hash ${normalizedHash}/${oracle.expectedNormalizedTextHash}`,
+            `anchors ${renderedAnchorCount}/${oracle.expectedAnchorCount}`,
+            `mismatch at ${mismatchIndex}`,
+            `actual ${JSON.stringify(normalizedRenderedText.slice(previewStart, previewEnd))}`,
+            `expected ${JSON.stringify(oracle.expectedNormalizedText.slice(previewStart, previewEnd))}`,
+          ].join("; "),
+        );
+      }
+
       const state = window as BenchmarkWindow;
       const probe = state.__PASEO_STREAM_BENCHMARK_PROBE__;
       if (!probe) throw new Error("stream benchmark probe was not armed");
@@ -373,6 +426,7 @@ async function finishStreamProbe(
       const renderedText = Array.from(assistantMessages)
         .map((element) => element.textContent ?? "")
         .join("");
+      await assertMarkdownRendering(assistantMessages, renderedText, markdownOracle);
       const renderedBytes = new TextEncoder().encode(renderedText);
       const renderedDigest = await crypto.subtle.digest("SHA-256", renderedBytes);
       const renderedTextHash = Array.from(new Uint8Array(renderedDigest), (byte) =>
@@ -395,8 +449,7 @@ async function finishStreamProbe(
         reactDurationMs: renderSamples.reduce((sum, sample) => sum + sample.actualDuration, 0),
         longTaskCount: probe.longTasks.length,
         longTaskDurationMs: probe.longTasks.reduce((sum, entry) => sum + entry.duration, 0),
-        droppedFrameCount: probe.frameGaps.filter((gap) => gap > 20).length,
-        maxFrameGapMs: Math.max(0, ...probe.frameGaps),
+        frameGapsMs: probe.frameGaps,
         feedbackDelayMs: feedbackDelayP95,
         feedbackDelayMaxMs: sortedFeedbackDelays.at(-1) ?? 0,
         feedbackSamples: sortedFeedbackDelays.length,
@@ -427,6 +480,7 @@ async function finishStreamProbe(
       heapBefore: input.heapBefore,
       heapAfterValue: heapAfter,
       verifyPlainText: input.verifyPlainText,
+      markdownOracle: input.markdownOracle,
     },
   );
 }
@@ -482,12 +536,14 @@ function buildCase(input: {
   workload: MarkdownWorkload;
   messageBytes: number;
   samples: StreamRunSample[];
+  markdownOracle: MarkdownTextOracle | null;
 }): BenchmarkCaseResult {
-  const { workload, messageBytes, samples } = input;
+  const { workload, messageBytes, samples, markdownOracle } = input;
   const reducerFlushDurations = samples.flatMap((sample) => sample.reducerFlushDurationsMs);
   const chunksPerFlush = samples.flatMap((sample) => sample.chunksPerFlush);
   const bytesPerFlush = samples.flatMap((sample) => sample.bytesPerFlush);
   const maxRuns = samples.flatMap((sample) => sample.maxContiguousRunPerFlush);
+  const frameSummaries = samples.map((sample) => summarizeFrameGaps(sample.frameGapsMs));
   const renderedTextHashes = new Set(samples.map((sample) => sample.renderedTextHash));
   if (renderedTextHashes.size !== 1) {
     throw new Error(`${workload}:${messageBytes} produced inconsistent rendered text hashes`);
@@ -508,8 +564,12 @@ function buildCase(input: {
       chunkBytes: CHUNK_BYTES,
       providerChunkCount: Math.ceil(messageBytes / CHUNK_BYTES),
       measuredRuns: samples.length,
+      assumedFrameIntervalMs: BENCHMARK_FRAME_INTERVAL_MS,
       renderedTextHash: samples[0]?.renderedTextHash ?? "missing",
       expandedRenderedTextHash: samples[0]?.expandedRenderedTextHash ?? "missing",
+      markdownOracleRelease: markdownOracle?.release ?? null,
+      expectedNormalizedTextHash: markdownOracle?.expectedNormalizedTextHash ?? null,
+      expectedAnchorCount: markdownOracle?.expectedAnchorCount ?? null,
     },
     metrics: {
       endToEnd: durationMetric(samples.map((sample) => sample.endToEndMs)),
@@ -524,8 +584,13 @@ function buildCase(input: {
       reactDuration: durationMetric(samples.map((sample) => sample.reactDurationMs)),
       longTaskCount: countMetric(samples.map((sample) => sample.longTaskCount)),
       longTaskDuration: durationMetric(samples.map((sample) => sample.longTaskDurationMs)),
-      droppedFrames: countMetric(samples.map((sample) => sample.droppedFrameCount)),
-      maxFrameGap: durationMetric(samples.map((sample) => sample.maxFrameGapMs)),
+      delayedFrameIntervals: countMetric(
+        frameSummaries.map((summary) => summary.delayedFrameIntervals),
+      ),
+      estimatedDroppedFrames: countMetric(
+        frameSummaries.map((summary) => summary.estimatedDroppedFrames),
+      ),
+      maxFrameGap: durationMetric(frameSummaries.map((summary) => summary.maxFrameGapMs)),
       feedbackDelay: durationMetric(samples.map((sample) => sample.feedbackDelayMs)),
       feedbackDelayMax: durationMetric(samples.map((sample) => sample.feedbackDelayMaxMs)),
       feedbackSamples: countMetric(samples.map((sample) => sample.feedbackSamples)),
@@ -547,12 +612,25 @@ function buildCase(input: {
   };
 }
 
-test("benchmarks live assistant streaming through reducer, React, and Markdown", async ({
-  browser,
-}) => {
-  test.setTimeout(15 * 60_000);
-  let workspace: SeededWorkspace | null = null;
+async function measureStreamRun(input: {
+  browser: Browser;
+  workspace: SeededWorkspace;
+  workload: MarkdownWorkload;
+  messageBytes: number;
+  run: number;
+  markdownOracle: MarkdownTextOracle | null;
+}): Promise<StreamRunSample> {
+  const { browser, workspace, workload, messageBytes, run, markdownOracle } = input;
+  const created = await workspace.client.createAgent({
+    provider: "mock",
+    cwd: workspace.repoPath,
+    workspaceId: workspace.workspaceId,
+    title: `Desktop ${workload} ${messageBytes} run ${run}`,
+    modeId: "load-test",
+    model: "ten-second-stream",
+  });
   const context = await browser.newContext({ viewport: VIEWPORT });
+  let cdp: CDPSession | null = null;
   try {
     await seedBenchmarkStorage(context);
     const page = await context.newPage();
@@ -560,63 +638,81 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
     await page.routeWebSocket(/:(6767)\b/, async (ws) => {
       await ws.close({ code: 1008, reason: "Desktop stream benchmark blocks production daemon." });
     });
-    const cdp = await context.newCDPSession(page);
+    cdp = await context.newCDPSession(page);
     await cdp.send("HeapProfiler.enable");
+
+    await openEmptyAgent(page, workspace, created.id);
+    await cdp.send("HeapProfiler.collectGarbage");
+    const heapBefore = await readHeap(page);
+    await armStreamProbe(page);
+    const prompt = isMarkdownBenchmark
+      ? `emit ${messageBytes} byte markdown benchmark ${workload} in ${CHUNK_BYTES} byte chunks every 1 ms`
+      : `emit ${messageBytes} byte coalesced assistant stream in ${CHUNK_BYTES} byte chunks every 1 ms`;
+    await workspace.client.sendAgentMessage(created.id, prompt);
+    const result = await workspace.client.waitForFinish(created.id, 60_000);
+    if (result.status !== "idle") {
+      throw new Error(`stream benchmark agent ${created.id} finished as ${result.status}`);
+    }
+    await waitForAssistantBytes(page, messageBytes);
+    const sample = await finishStreamProbe(page, {
+      expectedBytes: messageBytes,
+      heapBefore,
+      verifyPlainText: !isMarkdownBenchmark,
+      markdownOracle,
+    });
+    const ax = await readAxNodeCounts(cdp);
+    await cdp.send("HeapProfiler.collectGarbage");
+    const postGcHeapBytes = await readHeap(page);
+    const expandedRenderedTextHash = await expandLongAssistantMessageAndReadHash(
+      page,
+      sample.renderedTextHash,
+    );
+    await workspace.client.archiveAgent(created.id);
+    await page.getByTestId(`workspace-tab-agent_${created.id}`).waitFor({
+      state: "detached",
+      timeout: 30_000,
+    });
+    return {
+      ...sample,
+      ...ax,
+      postGcHeapBytes,
+      expandedRenderedTextHash,
+    };
+  } finally {
+    await cdp?.detach();
+    await context.close();
+  }
+}
+
+test("benchmarks live assistant streaming through reducer, React, and Markdown", async ({
+  browser,
+}) => {
+  test.setTimeout(15 * 60_000);
+  let workspace: SeededWorkspace | null = null;
+  try {
     workspace = await seedWorkspace({ repoPrefix: "desktop-streaming-benchmark-" });
 
     const cases: BenchmarkCaseResult[] = [];
     for (const benchmarkCase of STREAM_CASES) {
       const { workload, messageBytes } = benchmarkCase;
+      const markdownOracle = isMarkdownBenchmark
+        ? buildMarkdownTextOracle(workload, messageBytes)
+        : null;
       const samples: StreamRunSample[] = [];
       for (let run = 0; run < MEASURED_RUNS; run += 1) {
-        const created = await workspace.client.createAgent({
-          provider: "mock",
-          cwd: workspace.repoPath,
-          workspaceId: workspace.workspaceId,
-          title: `Desktop ${workload} ${messageBytes} run ${run}`,
-          modeId: "load-test",
-          model: "ten-second-stream",
-        });
-        await openEmptyAgent(page, workspace, created.id);
-        await cdp.send("HeapProfiler.collectGarbage");
-        const heapBefore = await readHeap(page);
-        await armStreamProbe(page);
-        const prompt = isMarkdownBenchmark
-          ? `emit ${messageBytes} byte markdown benchmark ${workload} in ${CHUNK_BYTES} byte chunks every 1 ms`
-          : `emit ${messageBytes} byte coalesced assistant stream in ${CHUNK_BYTES} byte chunks every 1 ms`;
-        await workspace.client.sendAgentMessage(created.id, prompt);
-        const result = await workspace.client.waitForFinish(created.id, 60_000);
-        if (result.status !== "idle") {
-          throw new Error(`stream benchmark agent ${created.id} finished as ${result.status}`);
-        }
-        await waitForAssistantBytes(page, messageBytes);
-        const sample = await finishStreamProbe(page, {
-          expectedBytes: messageBytes,
-          heapBefore,
-          verifyPlainText: !isMarkdownBenchmark,
-        });
-        const ax = await readAxNodeCounts(cdp);
-        await cdp.send("HeapProfiler.collectGarbage");
-        const postGcHeapBytes = await readHeap(page);
-        const expandedRenderedTextHash = await expandLongAssistantMessageAndReadHash(
-          page,
-          sample.renderedTextHash,
+        samples.push(
+          await measureStreamRun({
+            browser,
+            workspace,
+            workload,
+            messageBytes,
+            run,
+            markdownOracle,
+          }),
         );
-        samples.push({
-          ...sample,
-          ...ax,
-          postGcHeapBytes,
-          expandedRenderedTextHash,
-        });
-        await workspace.client.archiveAgent(created.id);
-        await page.getByTestId(`workspace-tab-agent_${created.id}`).waitFor({
-          state: "detached",
-          timeout: 30_000,
-        });
       }
-      cases.push(buildCase({ workload, messageBytes, samples }));
+      cases.push(buildCase({ workload, messageBytes, samples, markdownOracle }));
     }
-    await cdp.detach();
 
     const result = {
       schemaVersion: 1,
@@ -628,10 +724,14 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
         chunkBytes: CHUNK_BYTES,
         feedbackTargetDelayMs: FEEDBACK_TARGET_DELAY_MS,
         feedbackSampleIntervalMs: FEEDBACK_SAMPLE_INTERVAL_MS,
+        rendererState: "fresh-context-per-run",
+        cacheState: "cold",
+        assumedFrameIntervalMs: BENCHMARK_FRAME_INTERVAL_MS,
         viewportWidth: VIEWPORT.width,
         viewportHeight: VIEWPORT.height,
-        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v4" : null,
-        scorerVersion: isMarkdownBenchmark ? "desktop_markdown_metrics_v4" : null,
+        benchmarkRelease: isMarkdownBenchmark ? "desktop_markdown_rendering@v5" : null,
+        scorerVersion: isMarkdownBenchmark ? "desktop_markdown_metrics_v5" : null,
+        correctnessOracle: isMarkdownBenchmark ? MARKDOWN_ORACLE_RELEASE : null,
       },
       cases,
     } satisfies BenchmarkTaskResult;
@@ -640,7 +740,6 @@ test("benchmarks live assistant streaming through reducer, React, and Markdown",
     if (outputPath) await writeFile(outputPath, serialized);
     if (process.env.PASEO_BENCHMARK_QUIET !== "1") process.stdout.write(serialized);
   } finally {
-    await context.close();
     await workspace?.cleanup();
   }
 });
