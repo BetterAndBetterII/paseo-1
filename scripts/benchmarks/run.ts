@@ -68,9 +68,10 @@ function selectTasks(taskIds: string[]): BenchmarkTaskDefinition[] {
 function runTask(task: BenchmarkTaskDefinition, resultPath: string): BenchmarkTaskResult {
   process.stderr.write(`[benchmark] running ${task.id}: ${task.description}\n`);
   const child = spawnSync(task.command, task.args, {
-    cwd: repoRoot,
+    cwd: resolve(repoRoot, task.cwd ?? "."),
     env: {
       ...process.env,
+      ...task.env,
       PASEO_BENCHMARK_OUTPUT: resultPath,
       PASEO_BENCHMARK_QUIET: "1",
     },

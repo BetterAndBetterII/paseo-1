@@ -653,7 +653,8 @@ npm run benchmark -- --output /tmp/paseo-benchmark.json
 Each task writes a `BenchmarkTaskResult` with stable task/case IDs, scalar dimensions, and named
 metrics. Add a benchmark by implementing that result contract and registering its command in
 `scripts/benchmarks/tasks.ts`. Keep workloads deterministic and make each task verify correctness
-before reporting timing data.
+before reporting timing data. The registry owns task working directories and environment
+variables; do not duplicate benchmark aliases in workspace `package.json` files.
 
 The registry currently covers:
 
