@@ -4082,6 +4082,46 @@ describe("processAgentStreamEvents", () => {
     expect(assistantBlocks.filter((item) => item.id === liveImageId)).toHaveLength(1);
   });
 
+  it("preserves per-event timestamps when continuations promote Markdown blocks", () => {
+    const events = [
+      makeStreamReducerEvent(makeTimelineEvent("First paragraph"), 1),
+      makeStreamReducerEvent(makeTimelineEvent("\n\nSecond paragraph\n\nThird"), 2),
+      makeStreamReducerEvent(makeTimelineEvent(" paragraph"), 3),
+    ];
+    let baselineTail: StreamItem[] = [];
+    let baselineHead: StreamItem[] = [];
+    let baselineCursor: TimelineCursor | undefined;
+    for (const reducerEvent of events) {
+      const baselineResult = processAgentStreamEvent({
+        event: reducerEvent.event,
+        seq: reducerEvent.seq,
+        epoch: reducerEvent.epoch,
+        currentTail: baselineTail,
+        currentHead: baselineHead,
+        currentCursor: baselineCursor,
+        currentAgent: null,
+        timestamp: reducerEvent.timestamp,
+      });
+      baselineTail = baselineResult.tail;
+      baselineHead = baselineResult.head;
+      baselineCursor = baselineResult.cursor ?? undefined;
+    }
+
+    const result = processAgentStreamEvents({
+      events,
+      currentTail: [],
+      currentHead: [],
+      currentCursor: undefined,
+      currentAgent: null,
+    });
+
+    expect({ tail: result.tail, head: result.head, cursor: result.cursor }).toEqual({
+      tail: baselineTail,
+      head: baselineHead,
+      cursor: baselineCursor,
+    });
+  });
+
   it("preserves a live block trailing newline after promoting completed markdown blocks", () => {
     const result = processAgentStreamEvents({
       events: [

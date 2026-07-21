@@ -1749,6 +1749,20 @@ function collectContiguousAssistantEvents(
   return run;
 }
 
+function canPreserveMarkdownPromotionTimestamps(
+  currentHead: StreamItem[],
+  continuationText: string,
+): boolean {
+  const activeAssistant = currentHead.findLast((item) => item.kind === "assistant_message");
+  const activeText = activeAssistant?.text ?? "";
+  let trailingWhitespaceStart = activeText.length;
+  while (trailingWhitespaceStart > 0 && /\s/u.test(activeText[trailingWhitespaceStart - 1] ?? "")) {
+    trailingWhitespaceStart -= 1;
+  }
+  const trailingWhitespace = activeText.slice(trailingWhitespaceStart);
+  return !/\n[^\S\n]*\n/u.test(`${trailingWhitespace}${continuationText}`);
+}
+
 function processCoalescedAssistantEvents(input: {
   events: AssistantTimelineReducerEvent[];
   currentTail: StreamItem[];
@@ -1756,6 +1770,11 @@ function processCoalescedAssistantEvents(input: {
   currentCursor: TimelineCursor | undefined;
   hasAuthoritativeBaseline?: boolean;
 }): ProcessAgentStreamEventOutput | null {
+  const continuationText = input.events.map((entry) => entry.event.item.text).join("");
+  if (!canPreserveMarkdownPromotionTimestamps(input.currentHead, continuationText)) {
+    return null;
+  }
+
   let cursor = input.currentCursor;
   let cursorChanged = false;
   let resetLiveTimeline = false;
@@ -1789,7 +1808,7 @@ function processCoalescedAssistantEvents(input: {
     ...first.event,
     item: {
       ...first.event.item,
-      text: input.events.map((entry) => entry.event.item.text).join(""),
+      text: continuationText,
     },
   };
   const applied = applyStreamEvent({
