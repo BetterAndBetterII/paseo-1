@@ -676,6 +676,12 @@ Every browser benchmark starts an isolated temporary daemon and Metro instance o
 The specs explicitly abort HTTP and WebSocket traffic to port 6767 so they cannot attach to the
 production Paseo daemon.
 
+Benchmark tasks may include default-disabled measurement probes, deterministic mock-provider
+workloads, or explicit ablation switches. They must not change normal runtime behavior. The only
+production optimization shipped alongside this initial registry is the Agent stream reducer's
+same-flush assistant-chunk coalescing; future optimizations should land separately with their own
+before/after registry results.
+
 ## Typecheck
 
 Always run typecheck after changes:

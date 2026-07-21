@@ -247,8 +247,8 @@ async function armStreamProbe(page: Page): Promise<void> {
       const state = window as BenchmarkWindow;
       state.__PASEO_AGENT_STREAM_FLUSH_PROFILE__ = [];
       state.__PASEO_RESET_RENDER_PROFILE__?.();
-      state.__PASEO_MARKDOWN_PARSE_PROFILE__ = [];
-      state.__PASEO_HIGHLIGHT_PROFILE__ = [];
+      state.__PASEO_MARKDOWN_PARSE_PROFILE__?.splice(0);
+      state.__PASEO_HIGHLIGHT_PROFILE__?.splice(0);
 
       const startedAt = performance.now();
       const longTasks: PerformanceEntry[] = [];

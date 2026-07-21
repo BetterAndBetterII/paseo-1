@@ -12,17 +12,18 @@ declare global {
   var __PASEO_HIGHLIGHT_PROFILE__: HighlightProfileSample[] | undefined;
 }
 
+const highlightProfile = globalThis.__PASEO_HIGHLIGHT_PROFILE__;
+
 function recordHighlightProfile(input: {
   codeChars: number;
   startedAt: number;
   cacheHit: boolean;
   lines: HighlightToken[][];
 }): void {
-  const profile = globalThis.__PASEO_HIGHLIGHT_PROFILE__;
-  if (!profile) {
+  if (!highlightProfile) {
     return;
   }
-  profile.push({
+  highlightProfile.push({
     codeChars: input.codeChars,
     durationMs: performance.now() - input.startedAt,
     cacheHit: input.cacheHit,
@@ -81,8 +82,7 @@ const tokenizationCache = new LRUCache<string, HighlightToken[][]>(200);
 export function tokenizeToLines(code: string, ext: string | null): HighlightToken[][] | null {
   if (!ext) return null;
   if (code.length > MAX_HIGHLIGHT_CHARS) return null;
-  const profile = globalThis.__PASEO_HIGHLIGHT_PROFILE__;
-  const startedAt = profile ? performance.now() : 0;
+  const startedAt = highlightProfile ? performance.now() : 0;
   const cacheKey = `${ext}:${code}`;
   const cached = tokenizationCache.get(cacheKey);
   if (cached) {

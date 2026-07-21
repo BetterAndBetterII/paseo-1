@@ -777,12 +777,13 @@ function createAssistantMarkdownParser(): ReturnType<typeof MarkdownIt> {
     return defaultValidateLink(url);
   };
 
+  const profile = globalThis.__PASEO_MARKDOWN_PARSE_PROFILE__;
+  if (!profile) {
+    return parser;
+  }
+
   const defaultParse = parser.parse.bind(parser);
   parser.parse = (source: string, env: unknown) => {
-    const profile = globalThis.__PASEO_MARKDOWN_PARSE_PROFILE__;
-    if (!profile) {
-      return defaultParse(source, env);
-    }
     const startedAt = performance.now();
     const tokens = defaultParse(source, env);
     profile.push({

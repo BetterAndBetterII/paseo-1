@@ -48,25 +48,31 @@ function buildStreams(sessionCount: number): Map<string, StreamItem[]> {
 }
 
 function measureAlwaysScan(streams: Map<string, StreamItem[]>): PolicyMeasurement {
-  let scannedItems = 0;
   const startedAt = performance.now();
   for (let index = 0; index < KEYSTROKES; index += 1) {
-    scannedItems += collectStreamUserImageIds(streams, new Set());
+    collectStreamUserImageIds(streams, new Set());
   }
-  return { durationMs: performance.now() - startedAt, scannedItems, scans: KEYSTROKES };
+  return {
+    durationMs: performance.now() - startedAt,
+    scannedItems: streams.size * ITEMS_PER_SESSION * KEYSTROKES,
+    scans: KEYSTROKES,
+  };
 }
 
 function measureImageReferencePolicy(streams: Map<string, StreamItem[]>): PolicyMeasurement {
-  let scannedItems = 0;
   let scans = 0;
   const startedAt = performance.now();
   for (let index = 0; index < KEYSTROKES; index += 1) {
     if (haveImageReferencesChanged([], [])) {
-      scannedItems += collectStreamUserImageIds(streams, new Set());
+      collectStreamUserImageIds(streams, new Set());
       scans += 1;
     }
   }
-  return { durationMs: performance.now() - startedAt, scannedItems, scans };
+  return {
+    durationMs: performance.now() - startedAt,
+    scannedItems: streams.size * ITEMS_PER_SESSION * scans,
+    scans,
+  };
 }
 
 function measurePolicy(
