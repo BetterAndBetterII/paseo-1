@@ -3915,7 +3915,6 @@ describe("processAgentStreamEvents", () => {
       currentTail: [],
       currentHead: [],
       currentCursor: undefined,
-      currentAgent: null,
     });
 
     expect(getAssistantTexts(result.head)).toEqual(["Hello world"]);
@@ -3961,7 +3960,6 @@ describe("processAgentStreamEvents", () => {
       currentTail: [],
       currentHead: [],
       currentCursor: undefined,
-      currentAgent: null,
     });
 
     expect(result.tail[0]).toMatchObject({
@@ -3981,7 +3979,6 @@ describe("processAgentStreamEvents", () => {
       currentTail: [],
       currentHead: [],
       currentCursor: { epoch: "epoch-1", startSeq: 1, endSeq: 1 },
-      currentAgent: null,
     });
 
     expect(getAssistantTexts(result.head)).toEqual(["accepted"]);
@@ -4005,7 +4002,6 @@ describe("processAgentStreamEvents", () => {
       currentTail: [],
       currentHead: [],
       currentCursor: { epoch: "epoch-1", startSeq: 1, endSeq: 1 },
-      currentAgent: null,
     });
 
     expect(result.tail).toEqual([]);
@@ -4099,7 +4095,6 @@ describe("processAgentStreamEvents", () => {
         currentTail: baselineTail,
         currentHead: baselineHead,
         currentCursor: baselineCursor,
-        currentAgent: null,
         timestamp: reducerEvent.timestamp,
       });
       baselineTail = baselineResult.tail;
@@ -4112,7 +4107,6 @@ describe("processAgentStreamEvents", () => {
       currentTail: [],
       currentHead: [],
       currentCursor: undefined,
-      currentAgent: null,
     });
 
     expect({ tail: result.tail, head: result.head, cursor: result.cursor }).toEqual({
@@ -4499,7 +4493,6 @@ describe("createAgentStreamReducerQueue", () => {
           currentTail: [],
           currentHead: [],
           currentCursor: undefined,
-          currentAgent: null,
         }),
         commit: () => {},
         handleSideEffects: () => {},

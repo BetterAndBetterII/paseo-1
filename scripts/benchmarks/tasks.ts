@@ -28,7 +28,7 @@ function appPlaywrightTask(
 ): Pick<BenchmarkTaskDefinition, "command" | "args" | "cwd" | "env"> {
   return {
     command: npxCommand,
-    args: ["--no-install", "playwright", "test", spec, "--project", "Desktop Chrome"],
+    args: ["--no-install", "playwright", "test", spec, "--project", "browser"],
     cwd: appWorkspace,
     env: { ...desktopBenchmarkEnvironment, ...env },
   };

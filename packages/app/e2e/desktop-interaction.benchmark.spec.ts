@@ -1,13 +1,13 @@
 import { writeFile } from "node:fs/promises";
 import type { Browser, BrowserContext, CDPSession, Page } from "@playwright/test";
-import { buildCreateAgentPreferences, buildSeededHost } from "./helpers/daemon-registry";
-import { getE2EDaemonPort } from "./helpers/daemon-port";
-import { buildAgentRoute } from "./helpers/mock-agent";
-import { getServerId } from "./helpers/server-id";
-import { seedWorkspace, type SeededWorkspace } from "./helpers/seed-client";
-import { scrollTimelineUntilOlderHistoryIsReachable } from "./helpers/timeline-pagination";
+import { buildCreateAgentPreferences, buildSeededHost } from "./support/helpers/daemon-registry";
+import { getE2EDaemonPort } from "./support/helpers/daemon-port";
+import { buildAgentRoute } from "./support/helpers/mock-agent";
+import { getServerId } from "./support/helpers/server-id";
+import { seedWorkspace, type SeededWorkspace } from "./support/helpers/seed-client";
+import { scrollTimelineUntilOlderHistoryIsReachable } from "./support/helpers/timeline-pagination";
 import { buildHostWorkspaceOpenRoute } from "../src/utils/host-routes";
-import { test } from "./fixtures";
+import { test } from "./support/fixtures";
 import type {
   BenchmarkCaseResult,
   BenchmarkMetricResult,
@@ -174,7 +174,7 @@ async function createBenchmarkContext(
     endpoint: `127.0.0.1:${daemonPort}`,
     nowIso,
   });
-  const preferences = buildCreateAgentPreferences(serverId);
+  const preferences = buildCreateAgentPreferences();
   await context.addInitScript(
     ({ seededDaemon, seededPreferences, virtualizationPolicy }) => {
       localStorage.setItem("@paseo:e2e", "1");
@@ -233,7 +233,7 @@ async function openAgentTab(
     timeout: 60_000,
   });
   if (loadFullHistory) {
-    await scrollTimelineUntilOlderHistoryIsReachable(page);
+    await scrollTimelineUntilOlderHistoryIsReachable(page, agent.oldestPrompt);
     await page.getByText(agent.oldestPrompt, { exact: true }).waitFor({
       state: "visible",
       timeout: 60_000,

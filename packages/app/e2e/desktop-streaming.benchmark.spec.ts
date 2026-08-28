@@ -10,7 +10,7 @@ import {
   summarizeFrameGaps,
   summarizeSamples,
 } from "../scripts/benchmark-support";
-import { test } from "./fixtures";
+import { test } from "./support/fixtures";
 import {
   buildMarkdownTextOracle,
   MARKDOWN_ORACLE_RELEASE,
@@ -18,11 +18,11 @@ import {
   type MarkdownTextOracle,
   type MarkdownWorkload,
 } from "./desktop-markdown-oracle";
-import { buildCreateAgentPreferences, buildSeededHost } from "./helpers/daemon-registry";
-import { getE2EDaemonPort } from "./helpers/daemon-port";
-import { buildAgentRoute } from "./helpers/mock-agent";
-import { getServerId } from "./helpers/server-id";
-import { seedWorkspace, type SeededWorkspace } from "./helpers/seed-client";
+import { buildCreateAgentPreferences, buildSeededHost } from "./support/helpers/daemon-registry";
+import { getE2EDaemonPort } from "./support/helpers/daemon-port";
+import { buildAgentRoute } from "./support/helpers/mock-agent";
+import { getServerId } from "./support/helpers/server-id";
+import { seedWorkspace, type SeededWorkspace } from "./support/helpers/seed-client";
 
 const STREAM_MESSAGE_SIZES_BYTES = [64 * 1024, 256 * 1024, 1024 * 1024] as const;
 const CHUNK_BYTES = 512;
@@ -201,7 +201,7 @@ async function seedBenchmarkStorage(context: BrowserContext): Promise<void> {
     endpoint: `127.0.0.1:${getE2EDaemonPort()}`,
     nowIso: new Date().toISOString(),
   });
-  const preferences = buildCreateAgentPreferences(serverId);
+  const preferences = buildCreateAgentPreferences();
   await context.addInitScript(
     ({ seededDaemon, seededPreferences }) => {
       localStorage.setItem("@paseo:e2e", "1");

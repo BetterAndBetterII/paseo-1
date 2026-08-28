@@ -133,7 +133,6 @@ function runBaselineBatch(events: AgentStreamReducerEvent[], state: ReducerState
   let changedTail = false;
   let changedHead = false;
   let cursorChanged = false;
-  let agentChanged = false;
   const sideEffects: unknown[] = [];
   for (const reducerEvent of events) {
     const result = processAgentStreamEvent({
@@ -143,7 +142,6 @@ function runBaselineBatch(events: AgentStreamReducerEvent[], state: ReducerState
       currentTail: tail,
       currentHead: head,
       currentCursor: cursor,
-      currentAgent: null,
       timestamp: reducerEvent.timestamp,
     });
     tail = result.tail;
@@ -155,10 +153,9 @@ function runBaselineBatch(events: AgentStreamReducerEvent[], state: ReducerState
       cursor = result.cursor ?? undefined;
       cursorChanged = true;
     }
-    agentChanged = agentChanged || result.agentChanged;
   }
-  if (agentChanged || sideEffects.length > 0) {
-    throw new Error("assistant-only baseline unexpectedly produced an agent patch or side effect");
+  if (sideEffects.length > 0) {
+    throw new Error("assistant-only baseline unexpectedly produced a side effect");
   }
   return { tail, head, cursor, changedTail, changedHead, cursorChanged };
 }
@@ -178,12 +175,9 @@ function runWorkload(workload: Workload, variant: BenchmarkVariant): WorkloadRes
         currentTail: state.tail,
         currentHead: state.head,
         currentCursor: state.cursor,
-        currentAgent: null,
       });
-      if (result.agentChanged || result.sideEffects.length > 0) {
-        throw new Error(
-          "assistant-only candidate unexpectedly produced an agent patch or side effect",
-        );
+      if (result.sideEffects.length > 0) {
+        throw new Error("assistant-only candidate unexpectedly produced a side effect");
       }
       batchResult = {
         tail: result.tail,

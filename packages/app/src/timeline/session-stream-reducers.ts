@@ -1829,6 +1829,74 @@ function processCoalescedAssistantEvents(input: {
   };
 }
 
+function reduceNextAgentStreamEvents(input: {
+  events: AgentStreamReducerEvent[];
+  index: number;
+  currentTail: StreamItem[];
+  currentHead: StreamItem[];
+  currentCursor: TimelineCursor | undefined;
+  hasAuthoritativeBaseline?: boolean;
+  canContainCoalescedContinuation: boolean;
+  transformTimelineItem?: TimelineItemTransform;
+}): { processed: ProcessAgentStreamEventOutput; nextIndex: number } {
+  const reducerEvent = input.events[input.index];
+  if (!reducerEvent) {
+    return {
+      processed: {
+        tail: input.currentTail,
+        head: input.currentHead,
+        changedTail: false,
+        changedHead: false,
+        cursor: input.currentCursor ?? null,
+        cursorChanged: false,
+        acknowledgedClientMessageIds: [],
+        sideEffects: [],
+      },
+      nextIndex: input.index + 1,
+    };
+  }
+
+  const previousReducerEvent = input.events[input.index - 1];
+  const nextReducerEvent = input.events[input.index + 1];
+  // Keep the first chunk on the existing path so new-message identity and
+  // whitespace semantics are established before continuations are batched. Requiring
+  // a following continuation also keeps the common one- and two-event flushes on the
+  // allocation-free existing path.
+  const beginsCoalescedContinuation =
+    input.canContainCoalescedContinuation &&
+    isAssistantTimelineReducerEvent(previousReducerEvent) &&
+    canCoalesceAssistantEvents(previousReducerEvent, reducerEvent) &&
+    canCoalesceAssistantEvents(reducerEvent, nextReducerEvent);
+  const coalescedEvents = beginsCoalescedContinuation
+    ? collectContiguousAssistantEvents(input.events, input.index)
+    : null;
+  const result = coalescedEvents
+    ? processCoalescedAssistantEvents({
+        events: coalescedEvents,
+        currentTail: input.currentTail,
+        currentHead: input.currentHead,
+        currentCursor: input.currentCursor,
+        hasAuthoritativeBaseline: input.hasAuthoritativeBaseline,
+      })
+    : null;
+  return {
+    processed:
+      result ??
+      processAgentStreamEvent({
+        event: reducerEvent.event,
+        seq: reducerEvent.seq,
+        epoch: reducerEvent.epoch,
+        currentTail: input.currentTail,
+        currentHead: input.currentHead,
+        currentCursor: input.currentCursor,
+        hasAuthoritativeBaseline: input.hasAuthoritativeBaseline,
+        timestamp: reducerEvent.timestamp,
+        transformTimelineItem: input.transformTimelineItem,
+      }),
+    nextIndex: input.index + (result && coalescedEvents ? coalescedEvents.length : 1),
+  };
+}
+
 export function processAgentStreamEvents(
   input: ProcessAgentStreamEventsInput,
 ): ProcessAgentStreamEventOutput {
@@ -1856,48 +1924,17 @@ export function processAgentStreamEvents(
   const canContainCoalescedContinuation = input.events.length >= 3;
 
   for (let index = 0; index < input.events.length; ) {
-    const reducerEvent = input.events[index];
-    if (!reducerEvent) {
-      break;
-    }
-
-    const previousReducerEvent = input.events[index - 1];
-    const nextReducerEvent = input.events[index + 1];
-    // Keep the first chunk on the existing path so new-message identity and
-    // whitespace semantics are established before continuations are batched. Requiring
-    // a following continuation also keeps the common one- and two-event flushes on the
-    // allocation-free existing path.
-    const beginsCoalescedContinuation =
-      canContainCoalescedContinuation &&
-      isAssistantTimelineReducerEvent(previousReducerEvent) &&
-      canCoalesceAssistantEvents(previousReducerEvent, reducerEvent) &&
-      canCoalesceAssistantEvents(reducerEvent, nextReducerEvent);
-    const coalescedEvents = beginsCoalescedContinuation
-      ? collectContiguousAssistantEvents(input.events, index)
-      : null;
-    const result = coalescedEvents
-      ? processCoalescedAssistantEvents({
-          events: coalescedEvents,
-          currentTail: tail,
-          currentHead: head,
-          currentCursor: cursor,
-          hasAuthoritativeBaseline: input.hasAuthoritativeBaseline,
-        })
-      : null;
-    const processed =
-      result ??
-      processAgentStreamEvent({
-        event: reducerEvent.event,
-        seq: reducerEvent.seq,
-        epoch: reducerEvent.epoch,
-        currentTail: tail,
-        currentHead: head,
-        currentCursor: cursor,
-        hasAuthoritativeBaseline: input.hasAuthoritativeBaseline,
-        timestamp: reducerEvent.timestamp,
-        transformTimelineItem: input.transformTimelineItem,
-      });
-    index += result && coalescedEvents ? coalescedEvents.length : 1;
+    const { processed, nextIndex } = reduceNextAgentStreamEvents({
+      events: input.events,
+      index,
+      currentTail: tail,
+      currentHead: head,
+      currentCursor: cursor,
+      hasAuthoritativeBaseline: input.hasAuthoritativeBaseline,
+      canContainCoalescedContinuation,
+      transformTimelineItem: input.transformTimelineItem,
+    });
+    index = nextIndex;
 
     tail = processed.tail;
     head = processed.head;

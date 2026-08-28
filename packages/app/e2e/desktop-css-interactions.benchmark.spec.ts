@@ -1,8 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import type { CDPSession, Page } from "@playwright/test";
-import { buildAgentRoute } from "./helpers/mock-agent";
-import { seedWorkspace, type SeededWorkspace } from "./helpers/seed-client";
-import { test } from "./fixtures";
+import { buildAgentRoute } from "./support/helpers/mock-agent";
+import { seedWorkspace, type SeededWorkspace } from "./support/helpers/seed-client";
+import { test } from "./support/fixtures";
 import type {
   BenchmarkCaseResult,
   BenchmarkMetricResult,
